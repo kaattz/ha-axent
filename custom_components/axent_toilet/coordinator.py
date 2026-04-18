@@ -222,6 +222,18 @@ class AxentCoordinator:
             await self._client.connect()
             _LOGGER.info("已连接到 AXENT 马桶: %s", self.address)
 
+            # 扫描并记录所有 GATT 服务和特征
+            for service in self._client.services:
+                _LOGGER.info(
+                    "GATT 服务: %s", service.uuid
+                )
+                for char in service.characteristics:
+                    props = ", ".join(char.properties)
+                    _LOGGER.info(
+                        "  特征: %s [%s] handle=%d",
+                        char.uuid, props, char.handle
+                    )
+
             # 订阅 Notify 特征
             await self._client.start_notify(
                 CHAR_NOTIFY_UUID, self._on_notification
