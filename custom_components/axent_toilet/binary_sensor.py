@@ -47,7 +47,7 @@ class AxentOccupancySensor(BinarySensorEntity):
 
         self._attr_unique_id = f"{entry.data['address']}_seat_occupancy"
         self._attr_icon = "mdi:seat"
-        self._attr_is_on = None
+        self._attr_is_on = False  # 默认无人，等待设备事件更新
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.data["address"])},
             "name": entry.data.get("name", "AXENT Smart Toilet"),

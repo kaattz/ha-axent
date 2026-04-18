@@ -8,6 +8,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CMD_AUTO_LID_FULL,
@@ -61,11 +62,7 @@ SELECT_DESCRIPTIONS: list[dict] = [
         "name": "盖板控制",
         "icon": "mdi:seat-outline",
         "options": ["closed", "half_open", "full_open"],
-        "option_labels": {
-            "closed": "全关",
-            "half_open": "单开",
-            "full_open": "全开",
-        },
+        "default": "closed",
         "commands": {
             "closed": CMD_LID_CLOSE,
             "half_open": CMD_LID_HALF_OPEN,
@@ -77,11 +74,7 @@ SELECT_DESCRIPTIONS: list[dict] = [
         "name": "夜灯模式",
         "icon": "mdi:lightbulb-night-outline",
         "options": ["off", "on", "smart"],
-        "option_labels": {
-            "off": "关闭",
-            "on": "常开",
-            "smart": "智能",
-        },
+        "default": "off",
         "commands": {
             "off": CMD_NIGHTLIGHT_OFF,
             "on": CMD_NIGHTLIGHT_ON,
@@ -93,11 +86,7 @@ SELECT_DESCRIPTIONS: list[dict] = [
         "name": "自动翻盖",
         "icon": "mdi:arrow-up-down",
         "options": ["off", "half_open", "full_open"],
-        "option_labels": {
-            "off": "关闭",
-            "half_open": "单开",
-            "full_open": "全开",
-        },
+        "default": "off",
         "commands": {
             "off": CMD_AUTO_LID_OFF,
             "half_open": CMD_AUTO_LID_HALF,
@@ -109,11 +98,7 @@ SELECT_DESCRIPTIONS: list[dict] = [
         "name": "声波清洗模式",
         "icon": "mdi:sine-wave",
         "options": ["1d", "2d", "3d"],
-        "option_labels": {
-            "1d": "1D",
-            "2d": "2D",
-            "3d": "3D",
-        },
+        "default": "1d",
         "commands": {
             "1d": CMD_SONIC_1D,
             "2d": CMD_SONIC_2D,
@@ -125,11 +110,7 @@ SELECT_DESCRIPTIONS: list[dict] = [
         "name": "感应距离",
         "icon": "mdi:signal-distance-variant",
         "options": ["far", "medium", "near"],
-        "option_labels": {
-            "far": "远",
-            "medium": "中",
-            "near": "近",
-        },
+        "default": "medium",
         "commands": {
             "far": CMD_SENSOR_RANGE_FAR,
             "medium": CMD_SENSOR_RANGE_MEDIUM,
@@ -141,13 +122,7 @@ SELECT_DESCRIPTIONS: list[dict] = [
         "name": "水温",
         "icon": "mdi:thermometer-water",
         "options": ["1", "2", "3", "4", "5"],
-        "option_labels": {
-            "1": "1档",
-            "2": "2档",
-            "3": "3档",
-            "4": "4档",
-            "5": "5档",
-        },
+        "default": "3",
         "commands": {
             "1": CMD_WATER_TEMP_1,
             "2": CMD_WATER_TEMP_2,
@@ -161,13 +136,7 @@ SELECT_DESCRIPTIONS: list[dict] = [
         "name": "水量",
         "icon": "mdi:water-plus-outline",
         "options": ["1", "2", "3", "4", "5"],
-        "option_labels": {
-            "1": "1档",
-            "2": "2档",
-            "3": "3档",
-            "4": "4档",
-            "5": "5档",
-        },
+        "default": "3",
         "commands": {
             "1": CMD_WATER_VOLUME_1,
             "2": CMD_WATER_VOLUME_2,
@@ -181,13 +150,7 @@ SELECT_DESCRIPTIONS: list[dict] = [
         "name": "喷嘴位置",
         "icon": "mdi:spray",
         "options": ["1", "2", "3", "4", "5"],
-        "option_labels": {
-            "1": "1档",
-            "2": "2档",
-            "3": "3档",
-            "4": "4档",
-            "5": "5档",
-        },
+        "default": "3",
         "commands": {
             "1": CMD_NOZZLE_POS_1,
             "2": CMD_NOZZLE_POS_2,
@@ -201,13 +164,7 @@ SELECT_DESCRIPTIONS: list[dict] = [
         "name": "座温",
         "icon": "mdi:seat-recline-normal",
         "options": ["1", "2", "3", "4", "5"],
-        "option_labels": {
-            "1": "1档",
-            "2": "2档",
-            "3": "3档",
-            "4": "4档",
-            "5": "5档",
-        },
+        "default": "3",
         "commands": {
             "1": CMD_SEAT_TEMP_1,
             "2": CMD_SEAT_TEMP_2,
@@ -221,12 +178,7 @@ SELECT_DESCRIPTIONS: list[dict] = [
         "name": "自动冲水延时",
         "icon": "mdi:timer-outline",
         "options": ["off", "5s", "10s", "15s"],
-        "option_labels": {
-            "off": "关闭",
-            "5s": "5秒",
-            "10s": "10秒",
-            "15s": "15秒",
-        },
+        "default": "off",
         "commands": {
             "off": CMD_FLUSH_DELAY_OFF,
             "5s": CMD_FLUSH_DELAY_5S,
@@ -252,7 +204,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class AxentSelect(SelectEntity):
+class AxentSelect(SelectEntity, RestoreEntity):
     """Representation of an AXENT toilet select entity."""
 
     _attr_has_entity_name = True
@@ -265,6 +217,7 @@ class AxentSelect(SelectEntity):
     ) -> None:
         self._coordinator = coordinator
         self._commands: dict[str, bytes] = description["commands"]
+        self._default_option: str = description["default"]
 
         self._attr_unique_id = f"{entry.data['address']}_{description['key']}"
         self._attr_translation_key = description["key"]
@@ -277,6 +230,15 @@ class AxentSelect(SelectEntity):
             "manufacturer": "AXENT",
             "model": "Smart Toilet",
         }
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last known state on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state in self._attr_options:
+            self._attr_current_option = last_state.state
+        else:
+            self._attr_current_option = self._default_option
 
     async def async_select_option(self, option: str) -> None:
         """Handle option selection."""

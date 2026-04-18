@@ -9,6 +9,7 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CMD_AUTO_CLOSE_OFF,
@@ -36,6 +37,7 @@ SWITCH_DESCRIPTIONS: list[dict] = [
         "icon": "mdi:air-filter",
         "command_on": CMD_DEODORIZE_ON,
         "command_off": CMD_DEODORIZE_OFF,
+        "default": False,
     },
     {
         "key": "auto_close_lid",
@@ -43,6 +45,7 @@ SWITCH_DESCRIPTIONS: list[dict] = [
         "icon": "mdi:seat-outline",
         "command_on": CMD_AUTO_CLOSE_ON,
         "command_off": CMD_AUTO_CLOSE_OFF,
+        "default": False,
     },
     {
         "key": "fresh_water_exchange",
@@ -50,6 +53,7 @@ SWITCH_DESCRIPTIONS: list[dict] = [
         "icon": "mdi:water-sync",
         "command_on": CMD_FRESH_WATER_START,
         "command_off": CMD_FRESH_WATER_STOP,
+        "default": False,
     },
     {
         "key": "smart_power_save",
@@ -57,6 +61,7 @@ SWITCH_DESCRIPTIONS: list[dict] = [
         "icon": "mdi:leaf",
         "command_on": CMD_POWER_SAVE_ON,
         "command_off": CMD_POWER_SAVE_OFF,
+        "default": False,
     },
     {
         "key": "auto_flush",
@@ -64,6 +69,7 @@ SWITCH_DESCRIPTIONS: list[dict] = [
         "icon": "mdi:toilet",
         "command_on": CMD_AUTO_FLUSH_ON,
         "command_off": CMD_AUTO_FLUSH_OFF,
+        "default": False,
     },
     {
         "key": "flush_on_lid_close",
@@ -71,6 +77,7 @@ SWITCH_DESCRIPTIONS: list[dict] = [
         "icon": "mdi:arrow-down-bold-box-outline",
         "command_on": CMD_FLUSH_ON_CLOSE_ON,
         "command_off": CMD_FLUSH_ON_CLOSE_OFF,
+        "default": False,
     },
 ]
 
@@ -90,10 +97,11 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class AxentSwitch(SwitchEntity):
+class AxentSwitch(SwitchEntity, RestoreEntity):
     """Representation of an AXENT toilet switch."""
 
     _attr_has_entity_name = True
+    _attr_assumed_state = True  # 设备不回报状态，标记为假定状态
 
     def __init__(
         self,
@@ -104,6 +112,7 @@ class AxentSwitch(SwitchEntity):
         self._coordinator = coordinator
         self._command_on = description["command_on"]
         self._command_off = description["command_off"]
+        self._default_state: bool = description["default"]
 
         self._attr_unique_id = f"{entry.data['address']}_{description['key']}"
         self._attr_translation_key = description["key"]
@@ -115,6 +124,15 @@ class AxentSwitch(SwitchEntity):
             "manufacturer": "AXENT",
             "model": "Smart Toilet",
         }
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last known state on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state in ("on", "off"):
+            self._attr_is_on = last_state.state == "on"
+        else:
+            self._attr_is_on = self._default_state
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
