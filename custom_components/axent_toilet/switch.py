@@ -101,7 +101,6 @@ class AxentSwitch(SwitchEntity, RestoreEntity):
     """Representation of an AXENT toilet switch."""
 
     _attr_has_entity_name = True
-    _attr_assumed_state = True  # 设备不回报状态，标记为假定状态
 
     def __init__(
         self,
