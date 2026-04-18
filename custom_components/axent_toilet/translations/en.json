@@ -131,7 +131,8 @@
       "flush_on_lid_close": { "name": "Flush on Lid Close" }
     },
     "binary_sensor": {
-      "seat_occupancy": { "name": "Seat Occupancy" }
+      "seat_occupancy": { "name": "Seat Occupancy" },
+      "ble_connection": { "name": "BLE Connection" }
     }
   }
 }

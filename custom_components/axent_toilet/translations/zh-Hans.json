@@ -131,7 +131,8 @@
       "flush_on_lid_close": { "name": "关盖冲水" }
     },
     "binary_sensor": {
-      "seat_occupancy": { "name": "座圈感应" }
+      "seat_occupancy": { "name": "座圈感应" },
+      "ble_connection": { "name": "蓝牙连接" }
     }
   }
 }

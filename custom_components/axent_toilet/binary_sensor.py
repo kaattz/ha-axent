@@ -27,7 +27,10 @@ async def async_setup_entry(
     """Set up AXENT toilet binary sensor entities."""
     coordinator: AxentCoordinator = entry.runtime_data
 
-    async_add_entities([AxentOccupancySensor(coordinator, entry)])
+    async_add_entities([
+        AxentOccupancySensor(coordinator, entry),
+        AxentConnectivitySensor(coordinator, entry),
+    ])
 
 
 class AxentOccupancySensor(BinarySensorEntity):
@@ -72,4 +75,52 @@ class AxentOccupancySensor(BinarySensorEntity):
         """处理座圈感应事件。"""
         _LOGGER.debug("座圈感应状态: %s", "有人" if occupied else "无人")
         self._attr_is_on = occupied
+        self.async_write_ha_state()
+
+
+class AxentConnectivitySensor(BinarySensorEntity):
+    """BLE 连接状态传感器。"""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_translation_key = "ble_connection"
+
+    def __init__(
+        self,
+        coordinator: AxentCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        self._coordinator = coordinator
+        self._unregister: Callable[[], None] | None = None
+
+        self._attr_unique_id = f"{entry.data['address']}_ble_connection"
+        self._attr_icon = "mdi:bluetooth-connect"
+        self._attr_is_on = False
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.data["address"])},
+            "name": entry.data.get("name", "AXENT Smart Toilet"),
+            "manufacturer": "AXENT",
+            "model": "Smart Toilet",
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """注册连接状态回调。"""
+        self._unregister = self._coordinator.register_connection_callback(
+            self._on_connection_change
+        )
+        # 同步初始状态
+        self._attr_is_on = self._coordinator.is_connected
+        self.async_write_ha_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """取消注册回调。"""
+        if self._unregister is not None:
+            self._unregister()
+            self._unregister = None
+
+    @callback
+    def _on_connection_change(self, connected: bool) -> None:
+        """处理 BLE 连接状态变化。"""
+        _LOGGER.debug("BLE 连接状态: %s", "已连接" if connected else "已断开")
+        self._attr_is_on = connected
         self.async_write_ha_state()

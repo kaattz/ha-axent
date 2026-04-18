@@ -65,6 +65,7 @@ class AxentCoordinator:
         self._connect_lock = asyncio.Lock()
         self._disconnect_timer: asyncio.TimerHandle | None = None
         self._occupancy_callbacks: list[Callable[[bool], None]] = []
+        self._connection_callbacks: list[Callable[[bool], None]] = []
         self._connected = False
         self._occupied: bool | None = None
         self._device_id: bytes | None = device_id
@@ -96,6 +97,26 @@ class AxentCoordinator:
 
         return unregister
 
+    def register_connection_callback(
+        self, callback_fn: Callable[[bool], None]
+    ) -> Callable[[], None]:
+        """注册连接状态回调，返回取消注册的函数。"""
+        self._connection_callbacks.append(callback_fn)
+
+        def unregister() -> None:
+            self._connection_callbacks.remove(callback_fn)
+
+        return unregister
+
+    def _notify_connection_state(self, connected: bool) -> None:
+        """通知所有连接状态回调。"""
+        self._connected = connected
+        for cb in self._connection_callbacks:
+            try:
+                cb(connected)
+            except Exception:
+                _LOGGER.exception("连接状态回调执行失败")
+
     async def async_connect(self) -> None:
         """建立 BLE 连接并订阅 Notify。"""
         async with self._connect_lock:
@@ -122,13 +143,13 @@ class AxentCoordinator:
                 CHAR_NOTIFY_UUID, self._on_notification
             )
             _LOGGER.debug("已订阅 Notify 特征: %s", CHAR_NOTIFY_UUID)
-            self._connected = True
+            self._notify_connection_state(True)
 
     @callback
     def _on_disconnect(self, client: BleakClient) -> None:
         """BLE 断开回调。"""
         _LOGGER.warning("AXENT 马桶 BLE 连接已断开: %s", self.address)
-        self._connected = False
+        self._notify_connection_state(False)
 
     def _on_notification(
         self, sender: Any, data: bytearray
@@ -213,5 +234,5 @@ class AxentCoordinator:
                 _LOGGER.debug("断开连接时出错（忽略）", exc_info=True)
             finally:
                 self._client = None
-                self._connected = False
+                self._notify_connection_state(False)
                 _LOGGER.info("已断开 AXENT 马桶连接: %s", self.address)
