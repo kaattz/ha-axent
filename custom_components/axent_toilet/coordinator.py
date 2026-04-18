@@ -52,7 +52,13 @@ def _patch_command(command: bytes, device_id: bytes) -> bytes:
 class AxentCoordinator:
     """管理与 AXENT 智能马桶的 BLE 连接和通信。"""
 
-    def __init__(self, hass: HomeAssistant, address: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        address: str,
+        device_id: bytes | None = None,
+        on_device_id_discovered: Callable[[bytes], None] | None = None,
+    ) -> None:
         self.hass = hass
         self.address = address
         self._client: BleakClient | None = None
@@ -61,7 +67,13 @@ class AxentCoordinator:
         self._occupancy_callbacks: list[Callable[[bool], None]] = []
         self._connected = False
         self._occupied: bool | None = None
-        self._device_id: bytes | None = None  # 从 Notify 包自动提取
+        self._device_id: bytes | None = device_id
+        self._on_device_id_discovered = on_device_id_discovered
+
+        if device_id is not None:
+            _LOGGER.info(
+                "使用已保存的设备标识: %s", device_id.hex("-")
+            )
 
     @property
     def is_connected(self) -> bool:
@@ -126,13 +138,16 @@ class AxentCoordinator:
             "收到 Notify 数据 (sender=%s): %s", sender, data.hex("-")
         )
 
-        # 从任意 0x02-0x0E 控制帧中提取设备标识（仅首次）
+        # 从任意控制帧中提取设备标识（仅首次）
         if self._device_id is None and len(data) >= 16:
             if data[0] == 0x02 and data[1] in (0x0E, 0x9F):
                 self._device_id = bytes(data[_DEVICE_ID_SLICE])
                 _LOGGER.info(
                     "已提取设备标识: %s", self._device_id.hex("-")
                 )
+                # 通知上层持久化保存
+                if self._on_device_id_discovered is not None:
+                    self._on_device_id_discovered(self._device_id)
 
         parsed = parse_notification(data)
         if parsed is None:
