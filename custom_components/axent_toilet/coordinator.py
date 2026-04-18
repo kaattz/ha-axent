@@ -21,6 +21,33 @@ from .protocol import parse_notification
 
 _LOGGER = logging.getLogger(__name__)
 
+# 设备标识字节在帧中的位置 [11:16]（5 字节）
+_DEVICE_ID_SLICE = slice(11, 16)
+# 校验字节位置
+_CHECKSUM_POS = 29
+
+
+def _patch_command(command: bytes, device_id: bytes) -> bytes:
+    """用实际设备标识替换命令帧中的硬编码字节，并重算校验。
+
+    帧结构:
+      [0-1]  头部: 02-0E 或 02-9F
+      [2-10] 命令区
+      [11-15] 设备标识（5 字节，因设备而异）
+      [16-28] 参数区
+      [29]   校验: XOR(bytes[2:29])
+      [30-31] 尾部: 0F-04
+    """
+    frame = bytearray(command)
+    # 注入设备标识
+    frame[_DEVICE_ID_SLICE] = device_id
+    # 重算校验: XOR bytes[2] 到 bytes[28]
+    xor = 0
+    for b in frame[2:29]:
+        xor ^= b
+    frame[_CHECKSUM_POS] = xor
+    return bytes(frame)
+
 
 class AxentCoordinator:
     """管理与 AXENT 智能马桶的 BLE 连接和通信。"""
@@ -34,6 +61,7 @@ class AxentCoordinator:
         self._occupancy_callbacks: list[Callable[[bool], None]] = []
         self._connected = False
         self._occupied: bool | None = None
+        self._device_id: bytes | None = None  # 从 Notify 包自动提取
 
     @property
     def is_connected(self) -> bool:
@@ -98,6 +126,14 @@ class AxentCoordinator:
             "收到 Notify 数据 (sender=%s): %s", sender, data.hex("-")
         )
 
+        # 从任意 0x02-0x0E 控制帧中提取设备标识（仅首次）
+        if self._device_id is None and len(data) >= 16:
+            if data[0] == 0x02 and data[1] in (0x0E, 0x9F):
+                self._device_id = bytes(data[_DEVICE_ID_SLICE])
+                _LOGGER.info(
+                    "已提取设备标识: %s", self._device_id.hex("-")
+                )
+
         parsed = parse_notification(data)
         if parsed is None:
             return
@@ -121,11 +157,18 @@ class AxentCoordinator:
         if self._client is None:
             raise BleakError("BLE 客户端未初始化")
 
+        # 用设备实际标识替换命令帧中的硬编码字节
+        if self._device_id is not None:
+            patched = _patch_command(command, self._device_id)
+        else:
+            patched = command
+            _LOGGER.warning("设备标识未获取，使用原始命令帧")
+
         _LOGGER.debug(
-            "发送命令: %s → %s", command.hex("-"), CHAR_WRITE_UUID
+            "发送命令: %s → %s", patched.hex("-"), CHAR_WRITE_UUID
         )
         await self._client.write_gatt_char(
-            CHAR_WRITE_UUID, command, response=False
+            CHAR_WRITE_UUID, patched, response=False
         )
 
         # 命令发送后启动自动断开计时器
