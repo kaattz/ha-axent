@@ -1,0 +1,84 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "恩仕智能马桶",
+        "description": "请输入恩仕智能马桶的蓝牙 MAC 地址。",
+        "data": {
+          "address": "MAC 地址",
+          "name": "设备名称"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "发现恩仕智能马桶",
+        "description": "已发现恩仕智能马桶：{name}。是否要设置？"
+      }
+    },
+    "error": {
+      "invalid_mac": "MAC 地址格式无效"
+    },
+    "abort": {
+      "already_configured": "该设备已配置"
+    }
+  },
+  "entity": {
+    "button": {
+      "stop": { "name": "停止" },
+      "flush_small": { "name": "小冲" },
+      "flush_large": { "name": "大冲" },
+      "wash_rear": { "name": "臀洗" },
+      "wash_front": { "name": "妇洗" },
+      "dry": { "name": "烘干" },
+      "nozzle_clean": { "name": "喷嘴自洁" }
+    },
+    "select": {
+      "lid_position": {
+        "name": "盖板控制",
+        "state": {
+          "closed": "全关",
+          "half_open": "单开",
+          "full_open": "全开"
+        }
+      },
+      "nightlight_mode": {
+        "name": "夜灯模式",
+        "state": {
+          "off": "关闭",
+          "on": "常开",
+          "smart": "智能"
+        }
+      },
+      "auto_lid_mode": {
+        "name": "自动翻盖",
+        "state": {
+          "off": "关闭",
+          "half_open": "单开",
+          "full_open": "全开"
+        }
+      },
+      "sonic_wash_mode": {
+        "name": "声波清洗模式",
+        "state": {
+          "1d": "1D",
+          "2d": "2D",
+          "3d": "3D"
+        }
+      },
+      "sensor_range": {
+        "name": "感应距离",
+        "state": {
+          "far": "远",
+          "medium": "中",
+          "near": "近"
+        }
+      }
+    },
+    "switch": {
+      "auto_deodorize": { "name": "自动除臭" },
+      "auto_close_lid": { "name": "自动关盖" }
+    },
+    "binary_sensor": {
+      "seat_occupancy": { "name": "座圈感应" }
+    }
+  }
+}

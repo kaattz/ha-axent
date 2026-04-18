@@ -1,0 +1,22 @@
+{
+  "domain": "axent_toilet",
+  "name": "AXENT Smart Toilet",
+  "version": "1.0.0",
+  "config_flow": true,
+  "dependencies": ["bluetooth"],
+  "bluetooth": [
+    {
+      "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb",
+      "connectable": true
+    },
+    {
+      "local_name": "AXENT*",
+      "connectable": true
+    }
+  ],
+  "codeowners": [],
+  "documentation": "https://github.com/kaattz/ha-axent",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "requirements": []
+}

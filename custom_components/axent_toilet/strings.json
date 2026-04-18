@@ -1,0 +1,84 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "AXENT Smart Toilet",
+        "description": "Enter the Bluetooth MAC address of your AXENT smart toilet.",
+        "data": {
+          "address": "MAC Address",
+          "name": "Device Name"
+        }
+      },
+      "bluetooth_confirm": {
+        "title": "AXENT Smart Toilet Discovered",
+        "description": "Found AXENT smart toilet: {name}. Would you like to set it up?"
+      }
+    },
+    "error": {
+      "invalid_mac": "Invalid MAC address format"
+    },
+    "abort": {
+      "already_configured": "This device is already configured"
+    }
+  },
+  "entity": {
+    "button": {
+      "stop": { "name": "Stop" },
+      "flush_small": { "name": "Small Flush" },
+      "flush_large": { "name": "Large Flush" },
+      "wash_rear": { "name": "Rear Wash" },
+      "wash_front": { "name": "Front Wash" },
+      "dry": { "name": "Dry" },
+      "nozzle_clean": { "name": "Nozzle Clean" }
+    },
+    "select": {
+      "lid_position": {
+        "name": "Lid Position",
+        "state": {
+          "closed": "Closed",
+          "half_open": "Seat Only",
+          "full_open": "Full Open"
+        }
+      },
+      "nightlight_mode": {
+        "name": "Night Light",
+        "state": {
+          "off": "Off",
+          "on": "Always On",
+          "smart": "Smart"
+        }
+      },
+      "auto_lid_mode": {
+        "name": "Auto Lid",
+        "state": {
+          "off": "Off",
+          "half_open": "Seat Only",
+          "full_open": "Full Open"
+        }
+      },
+      "sonic_wash_mode": {
+        "name": "Sonic Wash Mode",
+        "state": {
+          "1d": "1D",
+          "2d": "2D",
+          "3d": "3D"
+        }
+      },
+      "sensor_range": {
+        "name": "Sensor Range",
+        "state": {
+          "far": "Far",
+          "medium": "Medium",
+          "near": "Near"
+        }
+      }
+    },
+    "switch": {
+      "auto_deodorize": { "name": "Auto Deodorize" },
+      "auto_close_lid": { "name": "Auto Close Lid" }
+    },
+    "binary_sensor": {
+      "seat_occupancy": { "name": "Seat Occupancy" }
+    }
+  }
+}
