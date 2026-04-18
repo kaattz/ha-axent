@@ -301,9 +301,19 @@ class AxentCoordinator:
         _LOGGER.debug(
             "发送命令: %s → %s", frame.hex("-"), CHAR_WRITE_UUID
         )
-        await self._client.write_gatt_char(
-            CHAR_WRITE_UUID, frame, response=False
-        )
+        try:
+            await self._client.write_gatt_char(
+                CHAR_WRITE_UUID, frame, response=True
+            )
+            _LOGGER.debug("命令写入成功 (with response)")
+        except Exception as err:
+            _LOGGER.warning(
+                "write_gatt_char(response=True) 失败: %s，尝试 response=False", err
+            )
+            await self._client.write_gatt_char(
+                CHAR_WRITE_UUID, frame, response=False
+            )
+            _LOGGER.debug("命令写入成功 (without response)")
 
         # 命令发送后启动自动断开计时器
         self._schedule_disconnect()
