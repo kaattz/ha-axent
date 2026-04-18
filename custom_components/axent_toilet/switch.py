@@ -11,21 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import (
-    CMD_AUTO_CLOSE_OFF,
-    CMD_AUTO_CLOSE_ON,
-    CMD_AUTO_FLUSH_OFF,
-    CMD_AUTO_FLUSH_ON,
-    CMD_DEODORIZE_OFF,
-    CMD_DEODORIZE_ON,
-    CMD_FLUSH_ON_CLOSE_OFF,
-    CMD_FLUSH_ON_CLOSE_ON,
-    CMD_FRESH_WATER_START,
-    CMD_FRESH_WATER_STOP,
-    CMD_POWER_SAVE_OFF,
-    CMD_POWER_SAVE_ON,
-    DOMAIN,
-)
+from .const import DOMAIN
 from .coordinator import AxentCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,50 +19,44 @@ _LOGGER = logging.getLogger(__name__)
 SWITCH_DESCRIPTIONS: list[dict] = [
     {
         "key": "auto_deodorize",
-        "name": "自动除臭",
         "icon": "mdi:air-filter",
-        "command_on": CMD_DEODORIZE_ON,
-        "command_off": CMD_DEODORIZE_OFF,
+        "command_on": "deodorize_on",
+        "command_off": "deodorize_off",
         "default": False,
     },
     {
         "key": "auto_close_lid",
-        "name": "自动关盖",
         "icon": "mdi:seat-outline",
-        "command_on": CMD_AUTO_CLOSE_ON,
-        "command_off": CMD_AUTO_CLOSE_OFF,
+        "command_on": "auto_close_on",
+        "command_off": "auto_close_off",
         "default": False,
     },
     {
         "key": "fresh_water_exchange",
-        "name": "活水置换",
         "icon": "mdi:water-sync",
-        "command_on": CMD_FRESH_WATER_START,
-        "command_off": CMD_FRESH_WATER_STOP,
+        "command_on": "fresh_start",
+        "command_off": "fresh_stop",
         "default": False,
     },
     {
         "key": "smart_power_save",
-        "name": "智能节电",
         "icon": "mdi:leaf",
-        "command_on": CMD_POWER_SAVE_ON,
-        "command_off": CMD_POWER_SAVE_OFF,
+        "command_on": "power_save_on",
+        "command_off": "power_save_off",
         "default": False,
     },
     {
         "key": "auto_flush",
-        "name": "自动冲水",
         "icon": "mdi:toilet",
-        "command_on": CMD_AUTO_FLUSH_ON,
-        "command_off": CMD_AUTO_FLUSH_OFF,
+        "command_on": "auto_flush_on",
+        "command_off": "auto_flush_off",
         "default": False,
     },
     {
         "key": "flush_on_lid_close",
-        "name": "关盖冲水",
         "icon": "mdi:arrow-down-bold-box-outline",
-        "command_on": CMD_FLUSH_ON_CLOSE_ON,
-        "command_off": CMD_FLUSH_ON_CLOSE_OFF,
+        "command_on": "flush_on_close_on",
+        "command_off": "flush_on_close_off",
         "default": False,
     },
 ]
@@ -109,8 +89,8 @@ class AxentSwitch(SwitchEntity, RestoreEntity):
         description: dict,
     ) -> None:
         self._coordinator = coordinator
-        self._command_on = description["command_on"]
-        self._command_off = description["command_off"]
+        self._command_on: str = description["command_on"]
+        self._command_off: str = description["command_off"]
         self._default_state: bool = description["default"]
 
         self._attr_unique_id = f"{entry.data['address']}_{description['key']}"
@@ -135,14 +115,14 @@ class AxentSwitch(SwitchEntity, RestoreEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
-        _LOGGER.debug("开启: %s", self._attr_translation_key)
+        _LOGGER.debug("开启: %s", self._command_on)
         await self._coordinator.async_send_command(self._command_on)
         self._attr_is_on = True
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
-        _LOGGER.debug("关闭: %s", self._attr_translation_key)
+        _LOGGER.debug("关闭: %s", self._command_off)
         await self._coordinator.async_send_command(self._command_off)
         self._attr_is_on = False
         self.async_write_ha_state()

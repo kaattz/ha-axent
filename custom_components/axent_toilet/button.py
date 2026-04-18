@@ -10,16 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import (
-    CMD_DRY,
-    CMD_FLUSH_LARGE,
-    CMD_FLUSH_SMALL,
-    CMD_NOZZLE_CLEAN_ON,
-    CMD_STOP,
-    CMD_WASH_FRONT,
-    CMD_WASH_REAR,
-    DOMAIN,
-)
+from .const import DOMAIN
 from .coordinator import AxentCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,49 +18,41 @@ _LOGGER = logging.getLogger(__name__)
 BUTTON_DESCRIPTIONS: list[dict] = [
     {
         "key": "stop",
-        "name": "停止",
         "icon": "mdi:stop-circle-outline",
-        "command": CMD_STOP,
+        "command": "stop",
     },
     {
         "key": "flush_small",
-        "name": "小冲",
         "icon": "mdi:water-outline",
-        "command": CMD_FLUSH_SMALL,
+        "command": "flush_small",
     },
     {
         "key": "flush_large",
-        "name": "大冲",
         "icon": "mdi:water",
-        "command": CMD_FLUSH_LARGE,
+        "command": "flush_large",
     },
-    # 以下三个功能需要人坐在马桶上才能运行
     {
         "key": "wash_rear",
-        "name": "臀洗",
         "icon": "mdi:shower-head",
-        "command": CMD_WASH_REAR,
+        "command": "wash_rear",
         "requires_occupancy": True,
     },
     {
         "key": "wash_front",
-        "name": "妇洗",
         "icon": "mdi:shower",
-        "command": CMD_WASH_FRONT,
+        "command": "wash_front",
         "requires_occupancy": True,
     },
     {
         "key": "dry",
-        "name": "烘干",
         "icon": "mdi:hair-dryer",
-        "command": CMD_DRY,
+        "command": "dry",
         "requires_occupancy": True,
     },
     {
         "key": "nozzle_clean",
-        "name": "喷嘴自洁",
         "icon": "mdi:spray",
-        "command": CMD_NOZZLE_CLEAN_ON,
+        "command": "nozzle_clean",
     },
 ]
 
@@ -101,7 +84,7 @@ class AxentButton(ButtonEntity):
         description: dict,
     ) -> None:
         self._coordinator = coordinator
-        self._command = description["command"]
+        self._command: str = description["command"]
         self._requires_occupancy = description.get("requires_occupancy", False)
 
         self._attr_unique_id = f"{entry.data['address']}_{description['key']}"
@@ -121,7 +104,5 @@ class AxentButton(ButtonEntity):
                 f"{self._attr_translation_key} 需要人坐在马桶上才能使用"
             )
 
-        _LOGGER.debug(
-            "按下按钮: %s", self._attr_translation_key
-        )
+        _LOGGER.debug("按下按钮: %s", self._command)
         await self._coordinator.async_send_command(self._command)

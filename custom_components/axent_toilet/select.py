@@ -10,48 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import (
-    CMD_AUTO_LID_FULL,
-    CMD_AUTO_LID_HALF,
-    CMD_AUTO_LID_OFF,
-    CMD_FLUSH_DELAY_5S,
-    CMD_FLUSH_DELAY_10S,
-    CMD_FLUSH_DELAY_15S,
-    CMD_FLUSH_DELAY_OFF,
-    CMD_LID_CLOSE,
-    CMD_LID_FULL_OPEN,
-    CMD_LID_HALF_OPEN,
-    CMD_NIGHTLIGHT_OFF,
-    CMD_NIGHTLIGHT_ON,
-    CMD_NIGHTLIGHT_SMART,
-    CMD_NOZZLE_POS_1,
-    CMD_NOZZLE_POS_2,
-    CMD_NOZZLE_POS_3,
-    CMD_NOZZLE_POS_4,
-    CMD_NOZZLE_POS_5,
-    CMD_SEAT_TEMP_1,
-    CMD_SEAT_TEMP_2,
-    CMD_SEAT_TEMP_3,
-    CMD_SEAT_TEMP_4,
-    CMD_SEAT_TEMP_5,
-    CMD_SENSOR_RANGE_FAR,
-    CMD_SENSOR_RANGE_MEDIUM,
-    CMD_SENSOR_RANGE_NEAR,
-    CMD_SONIC_1D,
-    CMD_SONIC_2D,
-    CMD_SONIC_3D,
-    CMD_WATER_TEMP_1,
-    CMD_WATER_TEMP_2,
-    CMD_WATER_TEMP_3,
-    CMD_WATER_TEMP_4,
-    CMD_WATER_TEMP_5,
-    CMD_WATER_VOLUME_1,
-    CMD_WATER_VOLUME_2,
-    CMD_WATER_VOLUME_3,
-    CMD_WATER_VOLUME_4,
-    CMD_WATER_VOLUME_5,
-    DOMAIN,
-)
+from .const import DOMAIN
 from .coordinator import AxentCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,131 +18,121 @@ _LOGGER = logging.getLogger(__name__)
 SELECT_DESCRIPTIONS: list[dict] = [
     {
         "key": "lid_position",
-        "name": "盖板控制",
         "icon": "mdi:seat-outline",
         "options": ["closed", "half_open", "full_open"],
         "default": "closed",
         "commands": {
-            "closed": CMD_LID_CLOSE,
-            "half_open": CMD_LID_HALF_OPEN,
-            "full_open": CMD_LID_FULL_OPEN,
+            "closed": "lid_close",
+            "half_open": "lid_half",
+            "full_open": "lid_full",
         },
     },
     {
         "key": "nightlight_mode",
-        "name": "夜灯模式",
         "icon": "mdi:lightbulb-night-outline",
         "options": ["off", "on", "smart"],
         "default": "off",
         "commands": {
-            "off": CMD_NIGHTLIGHT_OFF,
-            "on": CMD_NIGHTLIGHT_ON,
-            "smart": CMD_NIGHTLIGHT_SMART,
+            "off": "nightlight_off",
+            "on": "nightlight_on",
+            "smart": "nightlight_smart",
         },
     },
     {
         "key": "auto_lid_mode",
-        "name": "自动翻盖",
         "icon": "mdi:arrow-up-down",
         "options": ["off", "half_open", "full_open"],
         "default": "off",
         "commands": {
-            "off": CMD_AUTO_LID_OFF,
-            "half_open": CMD_AUTO_LID_HALF,
-            "full_open": CMD_AUTO_LID_FULL,
+            "off": "auto_lid_off",
+            "half_open": "auto_lid_half",
+            "full_open": "auto_lid_full",
         },
     },
     {
         "key": "sonic_wash_mode",
-        "name": "声波清洗模式",
         "icon": "mdi:sine-wave",
         "options": ["1d", "2d", "3d"],
         "default": "1d",
         "commands": {
-            "1d": CMD_SONIC_1D,
-            "2d": CMD_SONIC_2D,
-            "3d": CMD_SONIC_3D,
+            "1d": "sonic_1d",
+            "2d": "sonic_2d",
+            "3d": "sonic_3d",
         },
     },
     {
         "key": "sensor_range",
-        "name": "感应距离",
         "icon": "mdi:signal-distance-variant",
         "options": ["far", "medium", "near"],
         "default": "medium",
         "commands": {
-            "far": CMD_SENSOR_RANGE_FAR,
-            "medium": CMD_SENSOR_RANGE_MEDIUM,
-            "near": CMD_SENSOR_RANGE_NEAR,
+            "far": "sensor_far",
+            "medium": "sensor_medium",
+            "near": "sensor_near",
         },
     },
     {
         "key": "water_temperature",
-        "name": "水温",
         "icon": "mdi:thermometer-water",
         "options": ["1", "2", "3", "4", "5"],
         "default": "3",
         "commands": {
-            "1": CMD_WATER_TEMP_1,
-            "2": CMD_WATER_TEMP_2,
-            "3": CMD_WATER_TEMP_3,
-            "4": CMD_WATER_TEMP_4,
-            "5": CMD_WATER_TEMP_5,
+            "1": "water_temp_1",
+            "2": "water_temp_2",
+            "3": "water_temp_3",
+            "4": "water_temp_4",
+            "5": "water_temp_5",
         },
     },
     {
         "key": "water_volume",
-        "name": "水量",
         "icon": "mdi:water-plus-outline",
         "options": ["1", "2", "3", "4", "5"],
         "default": "3",
         "commands": {
-            "1": CMD_WATER_VOLUME_1,
-            "2": CMD_WATER_VOLUME_2,
-            "3": CMD_WATER_VOLUME_3,
-            "4": CMD_WATER_VOLUME_4,
-            "5": CMD_WATER_VOLUME_5,
+            "1": "water_vol_1",
+            "2": "water_vol_2",
+            "3": "water_vol_3",
+            "4": "water_vol_4",
+            "5": "water_vol_5",
         },
     },
     {
         "key": "nozzle_position",
-        "name": "喷嘴位置",
         "icon": "mdi:spray",
         "options": ["1", "2", "3", "4", "5"],
         "default": "3",
         "commands": {
-            "1": CMD_NOZZLE_POS_1,
-            "2": CMD_NOZZLE_POS_2,
-            "3": CMD_NOZZLE_POS_3,
-            "4": CMD_NOZZLE_POS_4,
-            "5": CMD_NOZZLE_POS_5,
+            "1": "nozzle_1",
+            "2": "nozzle_2",
+            "3": "nozzle_3",
+            "4": "nozzle_4",
+            "5": "nozzle_5",
         },
     },
     {
         "key": "seat_temperature",
-        "name": "座温",
         "icon": "mdi:seat-recline-normal",
         "options": ["1", "2", "3", "4", "5"],
         "default": "3",
         "commands": {
-            "1": CMD_SEAT_TEMP_1,
-            "2": CMD_SEAT_TEMP_2,
-            "3": CMD_SEAT_TEMP_3,
-            "4": CMD_SEAT_TEMP_4,
-            "5": CMD_SEAT_TEMP_5,
+            "1": "seat_temp_1",
+            "2": "seat_temp_2",
+            "3": "seat_temp_3",
+            "4": "seat_temp_4",
+            "5": "seat_temp_5",
         },
     },
     {
         "key": "flush_delay",
-        "name": "自动冲水延时",
         "icon": "mdi:timer-outline",
         "options": ["off", "5s", "10s", "15s"],
         "default": "off",
         "commands": {
-            "off": CMD_FLUSH_DELAY_OFF,
-            "5s": CMD_FLUSH_DELAY_5S,
-            "10s": CMD_FLUSH_DELAY_10S,
-            "15s": CMD_FLUSH_DELAY_15S,
+            "off": "flush_delay_off",
+            "5s": "flush_delay_5s",
+            "10s": "flush_delay_10s",
+            "15s": "flush_delay_15s",
         },
     },
 ]
@@ -216,7 +165,7 @@ class AxentSelect(SelectEntity, RestoreEntity):
         description: dict,
     ) -> None:
         self._coordinator = coordinator
-        self._commands: dict[str, bytes] = description["commands"]
+        self._commands: dict[str, str] = description["commands"]
         self._default_option: str = description["default"]
 
         self._attr_unique_id = f"{entry.data['address']}_{description['key']}"
@@ -247,9 +196,7 @@ class AxentSelect(SelectEntity, RestoreEntity):
             _LOGGER.error("未知选项: %s", option)
             return
 
-        _LOGGER.debug(
-            "选择 %s = %s", self._attr_translation_key, option
-        )
+        _LOGGER.debug("选择 %s = %s", self._attr_translation_key, option)
         await self._coordinator.async_send_command(command)
         self._attr_current_option = option
         self.async_write_ha_state()

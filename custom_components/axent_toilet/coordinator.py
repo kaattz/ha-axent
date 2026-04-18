@@ -21,32 +21,116 @@ from .protocol import parse_notification
 
 _LOGGER = logging.getLogger(__name__)
 
-# 设备标识字节在帧中的位置 [11:16]（5 字节）
-_DEVICE_ID_SLICE = slice(11, 16)
 # 校验字节位置
 _CHECKSUM_POS = 29
 
 
-def _patch_command(command: bytes, device_id: bytes) -> bytes:
-    """用实际设备标识替换命令帧中的硬编码字节，并重算校验。
+def _build_command(template: bytes, cmd_type: int, cmd_value: int) -> bytes:
+    """基于设备模板构建命令帧。
+
+    策略：用设备实际回传的完整帧做模板，只替换命令字节 [3:6]。
+    这样所有设备相关的字节（11-15, 20 等）都保持设备原生值。
 
     帧结构:
-      [0-1]  头部: 02-0E 或 02-9F
-      [2-10] 命令区
-      [11-15] 设备标识（5 字节，因设备而异）
-      [16-28] 参数区
-      [29]   校验: XOR(bytes[2:29])
+      [0-1]   头部: 02-0E
+      [2]     固定: 30
+      [3]     命令类型 (如 09=冲水, 07=盖板)
+      [4]     命令参数 (如 01=小冲, 02=大冲)
+      [5]     命令校验: byte[3] + byte[4]
+      [6-28]  设备/命令参数区（保持模板原值）
+      [29]    帧校验: XOR(bytes[2:29])
       [30-31] 尾部: 0F-04
     """
-    frame = bytearray(command)
-    # 注入设备标识
-    frame[_DEVICE_ID_SLICE] = device_id
-    # 重算校验: XOR bytes[2] 到 bytes[28]
+    frame = bytearray(template)
+    frame[3] = cmd_type
+    frame[4] = cmd_value
+    frame[5] = (cmd_type + cmd_value) & 0xFF
+    # 重算帧校验
     xor = 0
     for b in frame[2:29]:
         xor ^= b
     frame[_CHECKSUM_POS] = xor
     return bytes(frame)
+
+
+# 命令定义：(cmd_type, cmd_value)
+COMMANDS = {
+    # 动作类
+    "stop":         (0x00, 0x00),
+    "flush_small":  (0x09, 0x01),
+    "flush_large":  (0x09, 0x02),
+    "wash_rear":    (0x41, 0x34),
+    "wash_front":   (0x42, 0x34),
+    "dry":          (0x04, 0x25),
+    "nozzle_clean": (0x43, 0x50),
+    # 盖板
+    "lid_close":    (0x07, 0x00),
+    "lid_half":     (0x07, 0x01),
+    "lid_full":     (0x07, 0x02),
+    # 活水置换
+    "fresh_start":  (0x2A, 0x02),
+    "fresh_stop":   (0x2A, 0x01),
+    # 夜灯
+    "nightlight_off":   (0x06, 0x00),
+    "nightlight_on":    (0x06, 0x01),
+    "nightlight_smart": (0x06, 0x02),
+    # 自动翻盖
+    "auto_lid_off":     (0x08, 0x00),
+    "auto_lid_half":    (0x08, 0x01),
+    "auto_lid_full":    (0x08, 0x02),
+    # 除臭
+    "deodorize_on":     (0x05, 0x01),
+    "deodorize_off":    (0x05, 0x00),
+    # 自动关盖
+    "auto_close_on":    (0x0A, 0x01),
+    "auto_close_off":   (0x0A, 0x00),
+    # 声波清洗
+    "sonic_1d":   (0x15, 0x00),
+    "sonic_2d":   (0x15, 0x0C),
+    "sonic_3d":   (0x15, 0x03),
+    # 感应距离
+    "sensor_far":    (0x0B, 0x00),
+    "sensor_medium": (0x0B, 0x01),
+    "sensor_near":   (0x0B, 0x02),
+    # 水温
+    "water_temp_1": (0x01, 0x00),
+    "water_temp_2": (0x01, 0x01),
+    "water_temp_3": (0x01, 0x02),
+    "water_temp_4": (0x01, 0x03),
+    "water_temp_5": (0x01, 0x04),
+    # 水量
+    "water_vol_1": (0x02, 0x00),
+    "water_vol_2": (0x02, 0x01),
+    "water_vol_3": (0x02, 0x02),
+    "water_vol_4": (0x02, 0x03),
+    "water_vol_5": (0x02, 0x04),
+    # 喷嘴位置
+    "nozzle_1": (0x03, 0x00),
+    "nozzle_2": (0x03, 0x01),
+    "nozzle_3": (0x03, 0x02),
+    "nozzle_4": (0x03, 0x03),
+    "nozzle_5": (0x03, 0x04),
+    # 座温
+    "seat_temp_1": (0x10, 0x00),
+    "seat_temp_2": (0x10, 0x01),
+    "seat_temp_3": (0x10, 0x02),
+    "seat_temp_4": (0x10, 0x03),
+    "seat_temp_5": (0x10, 0x04),
+    # 智能节电
+    "power_save_on":  (0x0C, 0x01),
+    "power_save_off": (0x0C, 0x00),
+    # 自动冲水
+    "auto_flush_on":  (0x0D, 0x01),
+    "auto_flush_off": (0x0D, 0x00),
+    # 关盖冲水
+    "flush_on_close_on":  (0x0E, 0x01),
+    "flush_on_close_off": (0x0E, 0x00),
+    # 冲水延时
+    "flush_delay_off": (0x0F, 0x00),
+    "flush_delay_5s":  (0x0F, 0x01),
+    "flush_delay_10s": (0x0F, 0x02),
+    "flush_delay_15s": (0x0F, 0x03),
+}
 
 
 class AxentCoordinator:
@@ -56,8 +140,8 @@ class AxentCoordinator:
         self,
         hass: HomeAssistant,
         address: str,
-        device_id: bytes | None = None,
-        on_device_id_discovered: Callable[[bytes], None] | None = None,
+        device_template: bytes | None = None,
+        on_template_discovered: Callable[[bytes], None] | None = None,
     ) -> None:
         self.hass = hass
         self.address = address
@@ -68,12 +152,12 @@ class AxentCoordinator:
         self._connection_callbacks: list[Callable[[bool], None]] = []
         self._connected = False
         self._occupied: bool | None = None
-        self._device_id: bytes | None = device_id
-        self._on_device_id_discovered = on_device_id_discovered
+        self._device_template: bytes | None = device_template
+        self._on_template_discovered = on_template_discovered
 
-        if device_id is not None:
+        if device_template is not None:
             _LOGGER.info(
-                "使用已保存的设备标识: %s", device_id.hex("-")
+                "使用已保存的设备模板: %s", device_template.hex("-")
             )
 
     @property
@@ -159,16 +243,15 @@ class AxentCoordinator:
             "收到 Notify 数据 (sender=%s): %s", sender, data.hex("-")
         )
 
-        # 从任意控制帧中提取设备标识（仅首次）
-        if self._device_id is None and len(data) >= 16:
-            if data[0] == 0x02 and data[1] in (0x0E, 0x9F):
-                self._device_id = bytes(data[_DEVICE_ID_SLICE])
+        # 从 0x02-0x0E 控制帧中提取完整设备模板（仅首次）
+        if self._device_template is None and len(data) == 32:
+            if data[0] == 0x02 and data[1] == 0x0E:
+                self._device_template = bytes(data)
                 _LOGGER.info(
-                    "已提取设备标识: %s", self._device_id.hex("-")
+                    "已提取设备模板: %s", self._device_template.hex("-")
                 )
-                # 通知上层持久化保存
-                if self._on_device_id_discovered is not None:
-                    self._on_device_id_discovered(self._device_id)
+                if self._on_template_discovered is not None:
+                    self._on_template_discovered(self._device_template)
 
         parsed = parse_notification(data)
         if parsed is None:
@@ -183,8 +266,13 @@ class AxentCoordinator:
                 except Exception:
                     _LOGGER.exception("人体感应回调执行失败")
 
-    async def async_send_command(self, command: bytes) -> None:
-        """发送控制命令到马桶。"""
+    async def async_send_command(self, command: bytes | str) -> None:
+        """发送控制命令到马桶。
+
+        command 可以是:
+        - str: 命令名（如 "flush_small"），会基于设备模板动态构建
+        - bytes: 原始命令帧（向后兼容）
+        """
         self._cancel_disconnect_timer()
 
         if not self.is_connected:
@@ -193,18 +281,28 @@ class AxentCoordinator:
         if self._client is None:
             raise BleakError("BLE 客户端未初始化")
 
-        # 用设备实际标识替换命令帧中的硬编码字节
-        if self._device_id is not None:
-            patched = _patch_command(command, self._device_id)
+        if isinstance(command, str):
+            # 基于设备模板动态构建命令
+            if self._device_template is None:
+                _LOGGER.error(
+                    "设备模板未获取，无法发送命令: %s。"
+                    "请先在马桶上执行一次物理操作（如按冲水键）", command
+                )
+                return
+            cmd_def = COMMANDS.get(command)
+            if cmd_def is None:
+                _LOGGER.error("未知命令名: %s", command)
+                return
+            frame = _build_command(self._device_template, cmd_def[0], cmd_def[1])
         else:
-            patched = command
-            _LOGGER.warning("设备标识未获取，使用原始命令帧")
+            # 向后兼容：原始 bytes 命令
+            frame = command
 
         _LOGGER.debug(
-            "发送命令: %s → %s", patched.hex("-"), CHAR_WRITE_UUID
+            "发送命令: %s → %s", frame.hex("-"), CHAR_WRITE_UUID
         )
         await self._client.write_gatt_char(
-            CHAR_WRITE_UUID, patched, response=False
+            CHAR_WRITE_UUID, frame, response=False
         )
 
         # 命令发送后启动自动断开计时器
