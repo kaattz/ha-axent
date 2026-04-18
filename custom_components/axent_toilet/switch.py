@@ -13,8 +13,16 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import (
     CMD_AUTO_CLOSE_OFF,
     CMD_AUTO_CLOSE_ON,
+    CMD_AUTO_FLUSH_OFF,
+    CMD_AUTO_FLUSH_ON,
     CMD_DEODORIZE_OFF,
     CMD_DEODORIZE_ON,
+    CMD_FLUSH_ON_CLOSE_OFF,
+    CMD_FLUSH_ON_CLOSE_ON,
+    CMD_FRESH_WATER_START,
+    CMD_FRESH_WATER_STOP,
+    CMD_POWER_SAVE_OFF,
+    CMD_POWER_SAVE_ON,
     DOMAIN,
 )
 from .coordinator import AxentCoordinator
@@ -35,6 +43,34 @@ SWITCH_DESCRIPTIONS: list[dict] = [
         "icon": "mdi:seat-outline",
         "command_on": CMD_AUTO_CLOSE_ON,
         "command_off": CMD_AUTO_CLOSE_OFF,
+    },
+    {
+        "key": "fresh_water_exchange",
+        "name": "活水置换",
+        "icon": "mdi:water-sync",
+        "command_on": CMD_FRESH_WATER_START,
+        "command_off": CMD_FRESH_WATER_STOP,
+    },
+    {
+        "key": "smart_power_save",
+        "name": "智能节电",
+        "icon": "mdi:leaf",
+        "command_on": CMD_POWER_SAVE_ON,
+        "command_off": CMD_POWER_SAVE_OFF,
+    },
+    {
+        "key": "auto_flush",
+        "name": "自动冲水",
+        "icon": "mdi:toilet",
+        "command_on": CMD_AUTO_FLUSH_ON,
+        "command_off": CMD_AUTO_FLUSH_OFF,
+    },
+    {
+        "key": "flush_on_lid_close",
+        "name": "关盖冲水",
+        "icon": "mdi:arrow-down-bold-box-outline",
+        "command_on": CMD_FLUSH_ON_CLOSE_ON,
+        "command_off": CMD_FLUSH_ON_CLOSE_OFF,
     },
 ]
 

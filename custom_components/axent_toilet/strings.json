@@ -71,11 +71,64 @@
           "medium": "Medium",
           "near": "Near"
         }
+      },
+      "water_temperature": {
+        "name": "Water Temperature",
+        "state": {
+          "1": "Level 1",
+          "2": "Level 2",
+          "3": "Level 3",
+          "4": "Level 4",
+          "5": "Level 5"
+        }
+      },
+      "water_volume": {
+        "name": "Water Volume",
+        "state": {
+          "1": "Level 1",
+          "2": "Level 2",
+          "3": "Level 3",
+          "4": "Level 4",
+          "5": "Level 5"
+        }
+      },
+      "nozzle_position": {
+        "name": "Nozzle Position",
+        "state": {
+          "1": "Level 1",
+          "2": "Level 2",
+          "3": "Level 3",
+          "4": "Level 4",
+          "5": "Level 5"
+        }
+      },
+      "seat_temperature": {
+        "name": "Seat Temperature",
+        "state": {
+          "1": "Level 1",
+          "2": "Level 2",
+          "3": "Level 3",
+          "4": "Level 4",
+          "5": "Level 5"
+        }
+      },
+      "flush_delay": {
+        "name": "Auto Flush Delay",
+        "state": {
+          "off": "Off",
+          "5s": "5 Seconds",
+          "10s": "10 Seconds",
+          "15s": "15 Seconds"
+        }
       }
     },
     "switch": {
       "auto_deodorize": { "name": "Auto Deodorize" },
-      "auto_close_lid": { "name": "Auto Close Lid" }
+      "auto_close_lid": { "name": "Auto Close Lid" },
+      "fresh_water_exchange": { "name": "Fresh Water Exchange" },
+      "smart_power_save": { "name": "Smart Power Save" },
+      "auto_flush": { "name": "Auto Flush" },
+      "flush_on_lid_close": { "name": "Flush on Lid Close" }
     },
     "binary_sensor": {
       "seat_occupancy": { "name": "Seat Occupancy" }

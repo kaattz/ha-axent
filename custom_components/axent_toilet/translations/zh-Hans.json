@@ -11,11 +11,11 @@
       },
       "bluetooth_confirm": {
         "title": "发现恩仕智能马桶",
-        "description": "已发现恩仕智能马桶：{name}。是否要设置？"
+        "description": "已发现恩仕智能马桶: {name}。是否要设置？"
       }
     },
     "error": {
-      "invalid_mac": "MAC 地址格式无效"
+      "invalid_mac": "无效的 MAC 地址格式"
     },
     "abort": {
       "already_configured": "该设备已配置"
@@ -71,11 +71,64 @@
           "medium": "中",
           "near": "近"
         }
+      },
+      "water_temperature": {
+        "name": "水温",
+        "state": {
+          "1": "1档",
+          "2": "2档",
+          "3": "3档",
+          "4": "4档",
+          "5": "5档"
+        }
+      },
+      "water_volume": {
+        "name": "水量",
+        "state": {
+          "1": "1档",
+          "2": "2档",
+          "3": "3档",
+          "4": "4档",
+          "5": "5档"
+        }
+      },
+      "nozzle_position": {
+        "name": "喷嘴位置",
+        "state": {
+          "1": "1档",
+          "2": "2档",
+          "3": "3档",
+          "4": "4档",
+          "5": "5档"
+        }
+      },
+      "seat_temperature": {
+        "name": "座温",
+        "state": {
+          "1": "1档",
+          "2": "2档",
+          "3": "3档",
+          "4": "4档",
+          "5": "5档"
+        }
+      },
+      "flush_delay": {
+        "name": "自动冲水延时",
+        "state": {
+          "off": "关闭",
+          "5s": "5秒",
+          "10s": "10秒",
+          "15s": "15秒"
+        }
       }
     },
     "switch": {
       "auto_deodorize": { "name": "自动除臭" },
-      "auto_close_lid": { "name": "自动关盖" }
+      "auto_close_lid": { "name": "自动关盖" },
+      "fresh_water_exchange": { "name": "活水置换" },
+      "smart_power_save": { "name": "智能节电" },
+      "auto_flush": { "name": "自动冲水" },
+      "flush_on_lid_close": { "name": "关盖冲水" }
     },
     "binary_sensor": {
       "seat_occupancy": { "name": "座圈感应" }
