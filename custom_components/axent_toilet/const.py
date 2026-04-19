@@ -450,5 +450,4 @@ EVENT_UNOCCUPIED = bytes([0x30, 0x13])  # 起身（无人）
 PLATFORMS = ["button", "select", "switch", "binary_sensor"]
 
 # --- 连接参数 ---
-DISCONNECT_DELAY = 120  # 断开连接前的空闲等待时间（秒）
-RECONNECT_INTERVAL = 30  # 重连间隔（秒）
+RECONNECT_INTERVAL = 30  # 断线重连间隔（秒）
