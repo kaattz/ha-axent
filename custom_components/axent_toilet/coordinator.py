@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any, Callable
 
 from bleak import BleakClient
@@ -21,35 +22,63 @@ from .protocol import parse_notification
 
 _LOGGER = logging.getLogger(__name__)
 
+# 工厂码（默认值 0x30 = 48）
+FACTORY_CODE = 0x30
+
 # 校验字节位置
 _CHECKSUM_POS = 29
 
 
-def _build_command(template: bytes, cmd_type: int, cmd_value: int) -> bytes:
-    """基于设备模板构建命令帧。
-
-    策略：用设备实际回传的完整帧做模板，只替换命令字节 [3:6]。
-    这样所有设备相关的字节（11-15, 20 等）都保持设备原生值。
-
-    帧结构:
-      [0-1]   头部: 02-0E
-      [2]     固定: 30
-      [3]     命令类型 (如 09=冲水, 07=盖板)
-      [4]     命令参数 (如 01=小冲, 02=大冲)
-      [5]     命令校验: byte[3] + byte[4]
-      [6-28]  设备/命令参数区（保持模板原值）
-      [29]    帧校验: XOR(bytes[2:29])
-      [30-31] 尾部: 0F-04
-    """
-    frame = bytearray(template)
-    frame[3] = cmd_type
-    frame[4] = cmd_value
-    frame[5] = (cmd_type + cmd_value) & 0xFF
-    # 重算帧校验
+def _xor_checksum(frame: bytearray) -> int:
+    """计算 XOR 校验: XOR(bytes[2:29])"""
     xor = 0
     for b in frame[2:29]:
         xor ^= b
-    frame[_CHECKSUM_POS] = xor
+    return xor
+
+
+def _build_command(cmd_type: int, cmd_value: int) -> bytes:
+    """构造 AXENT BLE 控制命令帧。
+
+    帧结构 (32 bytes):
+      [0]     帧头: 0x02
+      [1]     帧类型: 0x0A (Write 命令) — 回传帧为 0x0E
+      [2]     工厂码: 0x30
+      [3]     命令类型
+      [4]     命令参数
+      [5]     命令校验: byte[3] + byte[4]
+      [6-8]   固定 0x00
+      [9]     工厂码: 0x30
+      [10-23] 全部 0x00
+      [24]    时间编码: (星期 << 5) + 小时
+      [25]    分钟
+      [26-28] 固定 0x00
+      [29]    帧校验: XOR(bytes[2:29])
+      [30]    帧尾1: 0x0B
+      [31]    帧尾2: 0x04
+    """
+    now = datetime.now()
+    weekday = now.isoweekday()  # 1=Monday ... 7=Sunday
+    hour = now.hour
+    minute = now.minute
+    time_byte = (weekday << 5) + hour
+
+    frame = bytearray(32)
+    frame[0] = 0x02
+    frame[1] = 0x0A
+    frame[2] = FACTORY_CODE
+    frame[3] = cmd_type
+    frame[4] = cmd_value
+    frame[5] = (cmd_type + cmd_value) & 0xFF
+    # [6-8] = 0x00
+    frame[9] = FACTORY_CODE
+    # [10-23] = 0x00
+    frame[24] = time_byte & 0xFF
+    frame[25] = minute & 0xFF
+    # [26-28] = 0x00
+    frame[29] = _xor_checksum(frame)
+    frame[30] = 0x0B
+    frame[31] = 0x04
     return bytes(frame)
 
 
@@ -140,8 +169,6 @@ class AxentCoordinator:
         self,
         hass: HomeAssistant,
         address: str,
-        device_template: bytes | None = None,
-        on_template_discovered: Callable[[bytes], None] | None = None,
     ) -> None:
         self.hass = hass
         self.address = address
@@ -149,16 +176,11 @@ class AxentCoordinator:
         self._connect_lock = asyncio.Lock()
         self._disconnect_timer: asyncio.TimerHandle | None = None
         self._occupancy_callbacks: list[Callable[[bool], None]] = []
+        self._seated_callbacks: list[Callable[[bool], None]] = []
         self._connection_callbacks: list[Callable[[bool], None]] = []
         self._connected = False
         self._occupied: bool | None = None
-        self._device_template: bytes | None = device_template
-        self._on_template_discovered = on_template_discovered
-
-        if device_template is not None:
-            _LOGGER.info(
-                "使用已保存的设备模板: %s", device_template.hex("-")
-            )
+        self._seated: bool | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -167,17 +189,33 @@ class AxentCoordinator:
 
     @property
     def is_occupied(self) -> bool | None:
-        """Return True if seat is occupied, None if unknown."""
+        """Return True if proximity detected, None if unknown."""
         return self._occupied
+
+    @property
+    def is_seated(self) -> bool | None:
+        """Return True if someone is seated, None if unknown."""
+        return self._seated
 
     def register_occupancy_callback(
         self, callback_fn: Callable[[bool], None]
     ) -> Callable[[], None]:
-        """注册人体感应回调，返回取消注册的函数。"""
+        """注册人体接近回调（毫米波雷达 02-9F 帧），返回取消注册的函数。"""
         self._occupancy_callbacks.append(callback_fn)
 
         def unregister() -> None:
             self._occupancy_callbacks.remove(callback_fn)
+
+        return unregister
+
+    def register_seated_callback(
+        self, callback_fn: Callable[[bool], None]
+    ) -> Callable[[], None]:
+        """注册就座状态回调（02-0E 帧 byte[20] bit 0），返回取消注册的函数。"""
+        self._seated_callbacks.append(callback_fn)
+
+        def unregister() -> None:
+            self._seated_callbacks.remove(callback_fn)
 
         return unregister
 
@@ -255,21 +293,14 @@ class AxentCoordinator:
             "收到 Notify 数据 (sender=%s): %s", sender, data.hex("-")
         )
 
-        # 从 0x02-0x0E 控制帧中提取完整设备模板（仅首次）
-        if self._device_template is None and len(data) == 32:
-            if data[0] == 0x02 and data[1] == 0x0E:
-                self._device_template = bytes(data)
-                _LOGGER.info(
-                    "已提取设备模板: %s", self._device_template.hex("-")
-                )
-                if self._on_template_discovered is not None:
-                    self._on_template_discovered(self._device_template)
-
         parsed = parse_notification(data)
         if parsed is None:
             return
 
-        if parsed.get("event") == "occupancy":
+        event = parsed.get("event")
+
+        # 毫米波雷达接近检测 (02-9F 帧)
+        if event == "occupancy":
             occupied = parsed["occupied"]
             self._occupied = occupied
             for cb in self._occupancy_callbacks:
@@ -277,6 +308,18 @@ class AxentCoordinator:
                     cb(occupied)
                 except Exception:
                     _LOGGER.exception("人体感应回调执行失败")
+
+        # 控制回传帧中的就座状态 (02-0E 帧, byte[20] bit 0)
+        if event == "status" and "seated" in parsed:
+            seated = parsed["seated"]
+            if seated != self._seated:
+                self._seated = seated
+                _LOGGER.info("就座状态变化: %s", "已就座" if seated else "已离座")
+                for cb in self._seated_callbacks:
+                    try:
+                        cb(seated)
+                    except Exception:
+                        _LOGGER.exception("就座状态回调执行失败")
 
     async def async_send_command(self, command: bytes | str) -> None:
         """发送控制命令到马桶。
@@ -294,18 +337,11 @@ class AxentCoordinator:
             raise BleakError("BLE 客户端未初始化")
 
         if isinstance(command, str):
-            # 基于设备模板动态构建命令
-            if self._device_template is None:
-                _LOGGER.error(
-                    "设备模板未获取，无法发送命令: %s。"
-                    "请先在马桶上执行一次物理操作（如按冲水键）", command
-                )
-                return
             cmd_def = COMMANDS.get(command)
             if cmd_def is None:
                 _LOGGER.error("未知命令名: %s", command)
                 return
-            frame = _build_command(self._device_template, cmd_def[0], cmd_def[1])
+            frame = _build_command(cmd_def[0], cmd_def[1])
         else:
             # 向后兼容：原始 bytes 命令
             frame = command

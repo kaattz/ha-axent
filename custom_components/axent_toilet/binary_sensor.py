@@ -29,12 +29,13 @@ async def async_setup_entry(
 
     async_add_entities([
         AxentOccupancySensor(coordinator, entry),
+        AxentSeatedSensor(coordinator, entry),
         AxentConnectivitySensor(coordinator, entry),
     ])
 
 
 class AxentOccupancySensor(BinarySensorEntity):
-    """座圈人体感应传感器。"""
+    """毫米波雷达人体接近传感器（02-9F 帧）。"""
 
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
@@ -49,8 +50,9 @@ class AxentOccupancySensor(BinarySensorEntity):
         self._unregister: Callable[[], None] | None = None
 
         self._attr_unique_id = f"{entry.data['address']}_seat_occupancy"
-        self._attr_icon = "mdi:seat"
-        self._attr_is_on = False  # 默认无人，等待设备事件更新
+        self._attr_name = "人体接近"
+        self._attr_icon = "mdi:motion-sensor"
+        self._attr_is_on = False
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.data["address"])},
             "name": entry.data.get("name", "AXENT Smart Toilet"),
@@ -59,7 +61,7 @@ class AxentOccupancySensor(BinarySensorEntity):
         }
 
     async def async_added_to_hass(self) -> None:
-        """注册人体感应事件回调。"""
+        """注册人体接近事件回调。"""
         self._unregister = self._coordinator.register_occupancy_callback(
             self._on_occupancy_event
         )
@@ -72,9 +74,55 @@ class AxentOccupancySensor(BinarySensorEntity):
 
     @callback
     def _on_occupancy_event(self, occupied: bool) -> None:
-        """处理座圈感应事件。"""
-        _LOGGER.debug("座圈感应状态: %s", "有人" if occupied else "无人")
+        """处理人体接近事件。"""
+        _LOGGER.debug("人体接近状态: %s", "有人" if occupied else "无人")
         self._attr_is_on = occupied
+        self.async_write_ha_state()
+
+
+class AxentSeatedSensor(BinarySensorEntity):
+    """就座状态传感器（02-0E 帧 byte[20] bit 0）。"""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
+    _attr_translation_key = "seat_seated"
+
+    def __init__(
+        self,
+        coordinator: AxentCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        self._coordinator = coordinator
+        self._unregister: Callable[[], None] | None = None
+
+        self._attr_unique_id = f"{entry.data['address']}_seat_seated"
+        self._attr_name = "就座状态"
+        self._attr_icon = "mdi:seat"
+        self._attr_is_on = False
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.data["address"])},
+            "name": entry.data.get("name", "AXENT Smart Toilet"),
+            "manufacturer": "AXENT",
+            "model": "Smart Toilet",
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """注册就座状态回调。"""
+        self._unregister = self._coordinator.register_seated_callback(
+            self._on_seated_event
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """取消注册回调。"""
+        if self._unregister is not None:
+            self._unregister()
+            self._unregister = None
+
+    @callback
+    def _on_seated_event(self, seated: bool) -> None:
+        """处理就座状态变化。"""
+        _LOGGER.debug("就座状态: %s", "已就座" if seated else "已离座")
+        self._attr_is_on = seated
         self.async_write_ha_state()
 
 
@@ -94,6 +142,7 @@ class AxentConnectivitySensor(BinarySensorEntity):
         self._unregister: Callable[[], None] | None = None
 
         self._attr_unique_id = f"{entry.data['address']}_ble_connection"
+        self._attr_name = "BLE 连接"
         self._attr_icon = "mdi:bluetooth-connect"
         self._attr_is_on = False
         self._attr_device_info = {

@@ -33,7 +33,9 @@
 | 🍃 **智能节电** | 开 / 关 | Switch |
 | 🚽 **自动冲水** | 开 / 关 | Switch |
 | 🔽 **关盖冲水** | 开 / 关 | Switch |
-| 🧑 **座圈感应** | 有人 / 无人 | Binary Sensor |
+| 📡 **人体接近** | 有人 / 无人（毫米波雷达） | Binary Sensor |
+| 🪑 **就座状态** | 已就座 / 已离座 | Binary Sensor |
+| 🔗 **BLE 连接** | 已连接 / 已断开 | Binary Sensor |
 
 > **入座保护**：臀洗、妇洗、烘干功能仅在检测到用户入座时可用，防止误触发。
 
@@ -80,13 +82,13 @@ cp -r custom_components/axent_toilet /config/custom_components/
 custom_components/axent_toilet/
 ├── __init__.py          # 集成入口，生命周期管理
 ├── config_flow.py       # 配置流程（蓝牙发现 + 手动输入）
-├── const.py             # 常量定义（BLE 命令帧、UUID）
-├── coordinator.py       # BLE 连接管理器（连接/断开/重连/通知订阅）
-├── protocol.py          # Notify 回包解析器
+├── const.py             # 常量定义（BLE UUID、事件标识）
+├── coordinator.py       # BLE 连接管理 + 命令帧构造
+├── protocol.py          # Notify 回包解析（状态帧 + 传感器帧）
 ├── button.py            # 按钮实体（冲洗/清洗/烘干/自洁/停止）
 ├── select.py            # 选择器实体（盖板/夜灯/翻盖/声波/感应距离/水温/水量/位置/座温/冲水延时）
 ├── switch.py            # 开关实体（自动除臭/关盖/活水置换/节电/冲水/关盖冲水）
-├── binary_sensor.py     # 二值传感器（座圈人体感应）
+├── binary_sensor.py     # 二值传感器（人体接近 + 就座状态 + BLE 连接）
 ├── manifest.json        # 集成清单
 ├── strings.json         # 英文翻译
 └── translations/
@@ -99,7 +101,7 @@ custom_components/axent_toilet/
 - **按需连接**：首次发送命令时建立 BLE 连接
 - **自动断开**：空闲 **120 秒** 后自动断开，节省蓝牙资源
 - **自动重连**：命令发送时检测连接状态，中断则自动重建
-- **Notify 订阅**：连接建立后立即订阅 `FFF1` 特征，实时接收座圈感应事件
+- **Notify 订阅**：连接后立即订阅 `FFF1` 特征，实时接收状态推送
 
 ---
 
@@ -114,17 +116,42 @@ custom_components/axent_toilet/
 
 ### 帧结构
 
-- **控制帧** `02-0E-30-XX-YY-ZZ-...`（32 字节） — 写入动作/设置命令
-- **扩展帧** `02-9F-30-XX-...`（32 字节） — 状态上报与传感器数据
+所有帧均为 **32 字节**，帧头帧尾区分方向：
+
+| 方向 | 帧头 | 帧尾 | 说明 |
+|------|------|------|------|
+| 手机→马桶（Write） | `02-0A` | `0B-04` | 控制命令帧 |
+| 马桶→手机（Notify） | `02-0E` | `0F-04` | 控制回传 / 状态帧 |
+| 马桶→手机（Notify） | `02-9F` | `0B-04` | 传感器 / 人体接近帧 |
+
+### 命令帧构造
+
+```text
+[0]  0x02          帧头
+[1]  0x0A          Write 帧类型
+[2]  0x30          工厂码
+[3]  CMD_TYPE      命令类型
+[4]  CMD_VALUE     命令参数
+[5]  CMD_TYPE + CMD_VALUE  命令校验
+[6-8]  0x00        固定零
+[9]  0x30          工厂码
+[10-23] 0x00       固定零
+[24] TIME_BYTE     (星期 << 5) + 小时
+[25] MINUTE        当前分钟
+[26-28] 0x00       固定零
+[29] XOR_CHECKSUM  XOR(bytes[2:29])
+[30] 0x0B          帧尾1
+[31] 0x04          帧尾2
+```
 
 ### 人体感应
 
-设备采用 **事件驱动模型**，通过不同命令包表示入座状态变化：
+设备搭载 **毫米波雷达**，通过 Notify 推送两种感应事件：
 
-```
-坐下（Occupied）  → 30-12
-起身（Unoccupied）→ 30-13
-```
+| 传感器 | 数据来源 | 说明 |
+|--------|---------|------|
+| **人体接近** | `02-9F` 传感器帧 | 毫米波雷达检测到有人走近马桶 |
+| **就座状态** | `02-0E` 控制帧 byte[20] bit 0 | 1=有人就座，0=无人 |
 
 详细协议文档请参阅 [axent_toilet_full_protocol.md](axent_toilet_full_protocol.md)。
 
@@ -139,7 +166,7 @@ automation:
   - alias: "离座自动小冲"
     trigger:
       - platform: state
-        entity_id: binary_sensor.axent_smart_toilet_seat_occupancy
+        entity_id: binary_sensor.axent_smart_toilet_seat_seated
         from: "on"
         to: "off"
         for: "00:00:05"
@@ -165,11 +192,29 @@ automation:
           option: "smart"
 ```
 
+### 有人接近自动开盖
+
+```yaml
+automation:
+  - alias: "接近自动开盖"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.axent_smart_toilet_seat_occupancy
+        to: "on"
+    action:
+      - service: select.select_option
+        target:
+          entity_id: select.axent_smart_toilet_lid
+        data:
+          option: "half_open"
+```
+
 ---
 
 ## 🔧 已知限制
 
-- **设置类命令无状态回报**：通过 Write（FFF2）发送的控制命令（如盖板位置、夜灯模式等），设备不会返回确认或当前值，因此 Select 和 Switch 实体的状态仅反映最近一次操作。传感器事件（座圈人体感应）则由设备通过 Notify（FFF1）主动推送，可实时获取
+- **设置类命令无状态回报**：Write 控制命令没有确认回包，Select 和 Switch 实体状态仅反映最近一次操作
+- **传感器状态实时推送**：人体接近和就座状态由设备通过 Notify 主动推送
 - 需要 Home Assistant 主机配备蓝牙适配器（内置或外接 USB）
 - BLE 通信距离受环境影响，建议马桶与 HA 主机距离不超过 10 米
 

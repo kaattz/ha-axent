@@ -22,27 +22,7 @@ async def async_setup_entry(
     address = entry.data["address"]
     _LOGGER.info("正在设置 AXENT 智能马桶: %s", address)
 
-    # 从 config entry 恢复已保存的设备模板
-    saved_hex = entry.data.get("device_template")
-    saved_template = bytes.fromhex(saved_hex) if saved_hex else None
-
-    def _on_template_discovered(template: bytes) -> None:
-        """设备模板首次发现时持久化保存到 config entry。"""
-        new_hex = template.hex()
-        if saved_hex == new_hex:
-            return
-        _LOGGER.info("持久化设备模板: %s", template.hex("-"))
-        hass.config_entries.async_update_entry(
-            entry,
-            data={**entry.data, "device_template": new_hex},
-        )
-
-    coordinator = AxentCoordinator(
-        hass,
-        address,
-        device_template=saved_template,
-        on_template_discovered=_on_template_discovered,
-    )
+    coordinator = AxentCoordinator(hass, address)
 
     # 尝试初始连接（非阻塞性，失败不影响设置）
     try:
