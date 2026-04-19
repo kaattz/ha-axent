@@ -24,12 +24,12 @@ async def async_setup_entry(
 
     coordinator = AxentCoordinator(hass, address)
 
-    # 尝试初始连接（非阻塞性，失败不影响设置）
+    # 启动常连模式（自动连接 + 断线重连）
     try:
-        await coordinator.async_connect()
+        await coordinator.async_start()
     except Exception:
         _LOGGER.warning(
-            "初始连接失败，将在首次命令时重试: %s", address, exc_info=True
+            "初始连接失败，将自动重连: %s", address, exc_info=True
         )
 
     entry.runtime_data = coordinator

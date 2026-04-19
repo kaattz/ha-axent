@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant, callback
 from .const import (
     CHAR_NOTIFY_UUID,
     CHAR_WRITE_UUID,
-    DISCONNECT_DELAY,
+    RECONNECT_INTERVAL,
 )
 from .protocol import parse_notification
 
@@ -163,7 +163,11 @@ COMMANDS = {
 
 
 class AxentCoordinator:
-    """管理与 AXENT 智能马桶的 BLE 连接和通信。"""
+    """管理与 AXENT 智能马桶的 BLE 连接和通信。
+
+    采用常连模式：启动后保持 BLE 连接，持续接收 Notify 帧，
+    断线后自动重连。
+    """
 
     def __init__(
         self,
@@ -174,7 +178,8 @@ class AxentCoordinator:
         self.address = address
         self._client: BleakClient | None = None
         self._connect_lock = asyncio.Lock()
-        self._disconnect_timer: asyncio.TimerHandle | None = None
+        self._reconnect_task: asyncio.Task | None = None
+        self._closing = False  # 标记是否正在关闭（卸载时不重连）
         self._occupancy_callbacks: list[Callable[[bool], None]] = []
         self._seated_callbacks: list[Callable[[bool], None]] = []
         self._connection_callbacks: list[Callable[[bool], None]] = []
@@ -200,7 +205,7 @@ class AxentCoordinator:
     def register_occupancy_callback(
         self, callback_fn: Callable[[bool], None]
     ) -> Callable[[], None]:
-        """注册人体接近回调（毫米波雷达 02-9F 帧），返回取消注册的函数。"""
+        """注册人体接近回调（02-0E 帧 byte[20]），返回取消注册的函数。"""
         self._occupancy_callbacks.append(callback_fn)
 
         def unregister() -> None:
@@ -211,7 +216,7 @@ class AxentCoordinator:
     def register_seated_callback(
         self, callback_fn: Callable[[bool], None]
     ) -> Callable[[], None]:
-        """注册就座状态回调（02-0E 帧 byte[20] bit 0），返回取消注册的函数。"""
+        """注册就座状态回调（02-9F 帧），返回取消注册的函数。"""
         self._seated_callbacks.append(callback_fn)
 
         def unregister() -> None:
@@ -239,6 +244,21 @@ class AxentCoordinator:
             except Exception:
                 _LOGGER.exception("连接状态回调执行失败")
 
+    async def async_start(self) -> None:
+        """启动常连模式：建立连接并在断线后自动重连。"""
+        self._closing = False
+        await self._try_connect()
+
+    async def _try_connect(self) -> None:
+        """尝试连接，失败后调度重连。"""
+        try:
+            await self.async_connect()
+        except Exception:
+            _LOGGER.warning(
+                "初始连接失败，%d 秒后重试", RECONNECT_INTERVAL
+            )
+            self._schedule_reconnect()
+
     async def async_connect(self) -> None:
         """建立 BLE 连接并订阅 Notify。"""
         async with self._connect_lock:
@@ -260,37 +280,51 @@ class AxentCoordinator:
             await self._client.connect()
             _LOGGER.info("已连接到 AXENT 马桶: %s", self.address)
 
-            # 扫描并记录所有 GATT 服务和特征
-            for service in self._client.services:
-                _LOGGER.info(
-                    "GATT 服务: %s", service.uuid
-                )
-                for char in service.characteristics:
-                    props = ", ".join(char.properties)
-                    _LOGGER.info(
-                        "  特征: %s [%s] handle=%d",
-                        char.uuid, props, char.handle
-                    )
-
             # 订阅 Notify 特征
             await self._client.start_notify(
                 CHAR_NOTIFY_UUID, self._on_notification
             )
-            _LOGGER.debug("已订阅 Notify 特征: %s", CHAR_NOTIFY_UUID)
+            _LOGGER.info("已订阅 Notify，持续监听状态帧")
             self._notify_connection_state(True)
 
     @callback
     def _on_disconnect(self, client: BleakClient) -> None:
-        """BLE 断开回调。"""
+        """BLE 断开回调 — 自动重连。"""
         _LOGGER.warning("AXENT 马桶 BLE 连接已断开: %s", self.address)
         self._notify_connection_state(False)
+        if not self._closing:
+            self._schedule_reconnect()
+
+    def _schedule_reconnect(self) -> None:
+        """调度自动重连任务。"""
+        if self._reconnect_task is not None and not self._reconnect_task.done():
+            return  # 已有重连任务在进行
+        self._reconnect_task = self.hass.async_create_task(
+            self._reconnect_loop()
+        )
+
+    async def _reconnect_loop(self) -> None:
+        """持续尝试重连直到成功。"""
+        while not self._closing:
+            await asyncio.sleep(RECONNECT_INTERVAL)
+            if self.is_connected or self._closing:
+                return
+            try:
+                _LOGGER.info("尝试重连 AXENT 马桶...")
+                await self.async_connect()
+                _LOGGER.info("重连成功")
+                return
+            except Exception:
+                _LOGGER.debug(
+                    "重连失败，%d 秒后重试", RECONNECT_INTERVAL
+                )
 
     def _on_notification(
         self, sender: Any, data: bytearray
     ) -> None:
         """处理 Notify 回包。"""
         _LOGGER.debug(
-            "收到 Notify 数据 (sender=%s): %s", sender, data.hex("-")
+            "收到 Notify: %s", data.hex("-")
         )
 
         parsed = parse_notification(data)
@@ -299,37 +333,37 @@ class AxentCoordinator:
 
         event = parsed.get("event")
 
-        # 毫米波雷达接近检测 (02-9F 帧)
+        # 02-9F 帧：就座检测（坐下/离座事件）
         if event == "occupancy":
-            occupied = parsed["occupied"]
-            self._occupied = occupied
-            for cb in self._occupancy_callbacks:
-                try:
-                    cb(occupied)
-                except Exception:
-                    _LOGGER.exception("人体感应回调执行失败")
-
-        # 控制回传帧中的就座状态 (02-0E 帧, byte[20] bit 0)
-        if event == "status" and "seated" in parsed:
-            seated = parsed["seated"]
+            seated = parsed["occupied"]
             if seated != self._seated:
                 self._seated = seated
-                _LOGGER.info("就座状态变化: %s", "已就座" if seated else "已离座")
+                _LOGGER.info("就座事件: %s", "坐下" if seated else "离座")
                 for cb in self._seated_callbacks:
                     try:
                         cb(seated)
                     except Exception:
-                        _LOGGER.exception("就座状态回调执行失败")
+                        _LOGGER.exception("就座回调执行失败")
+
+        # 02-0E 帧：状态帧中的人体接近（byte[20] bit 0）
+        if event == "status" and "seated" in parsed:
+            occupied = parsed["seated"]
+            if occupied != self._occupied:
+                self._occupied = occupied
+                _LOGGER.info("人体接近: %s", "有人" if occupied else "无人")
+                for cb in self._occupancy_callbacks:
+                    try:
+                        cb(occupied)
+                    except Exception:
+                        _LOGGER.exception("人体接近回调执行失败")
 
     async def async_send_command(self, command: bytes | str) -> None:
         """发送控制命令到马桶。
 
         command 可以是:
-        - str: 命令名（如 "flush_small"），会基于设备模板动态构建
+        - str: 命令名（如 "flush_small"），动态构建帧
         - bytes: 原始命令帧（向后兼容）
         """
-        self._cancel_disconnect_timer()
-
         if not self.is_connected:
             await self.async_connect()
 
@@ -343,7 +377,6 @@ class AxentCoordinator:
                 return
             frame = _build_command(cmd_def[0], cmd_def[1])
         else:
-            # 向后兼容：原始 bytes 命令
             frame = command
 
         _LOGGER.debug(
@@ -363,26 +396,12 @@ class AxentCoordinator:
             )
             _LOGGER.debug("命令写入成功 (without response)")
 
-        # 命令发送后启动自动断开计时器
-        self._schedule_disconnect()
-
-    def _schedule_disconnect(self) -> None:
-        """在空闲一段时间后自动断开连接以节省资源。"""
-        self._cancel_disconnect_timer()
-
-        self._disconnect_timer = self.hass.loop.call_later(
-            DISCONNECT_DELAY, lambda: asyncio.ensure_future(self.async_disconnect())
-        )
-
-    def _cancel_disconnect_timer(self) -> None:
-        """取消自动断开计时器。"""
-        if self._disconnect_timer is not None:
-            self._disconnect_timer.cancel()
-            self._disconnect_timer = None
-
     async def async_disconnect(self) -> None:
-        """断开 BLE 连接。"""
-        self._cancel_disconnect_timer()
+        """断开 BLE 连接（仅卸载时调用）。"""
+        self._closing = True
+        if self._reconnect_task is not None:
+            self._reconnect_task.cancel()
+            self._reconnect_task = None
         if self._client is not None and self._client.is_connected:
             try:
                 await self._client.disconnect()
