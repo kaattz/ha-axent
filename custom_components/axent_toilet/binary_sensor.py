@@ -28,14 +28,19 @@ async def async_setup_entry(
     coordinator: AxentCoordinator = entry.runtime_data
 
     async_add_entities([
-        AxentOccupancySensor(coordinator, entry),
         AxentSeatedSensor(coordinator, entry),
         AxentConnectivitySensor(coordinator, entry),
     ])
 
 
-class AxentOccupancySensor(BinarySensorEntity):
-    """毫米波雷达人体接近传感器（02-9F 帧）。"""
+class AxentSeatedSensor(BinarySensorEntity):
+    """就座状态传感器（毫米波雷达检测）。
+
+    数据来源：
+    - 02-9F 传感器帧：检测到坐下/离座时由马桶主动推送
+    - 02-0E 控制帧 byte[20] bit 0：跟随状态更新帧同步
+    两种来源共同驱动同一个就座状态。
+    """
 
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
@@ -47,55 +52,10 @@ class AxentOccupancySensor(BinarySensorEntity):
         entry: ConfigEntry,
     ) -> None:
         self._coordinator = coordinator
-        self._unregister: Callable[[], None] | None = None
+        self._unsub_occupancy: Callable[[], None] | None = None
+        self._unsub_seated: Callable[[], None] | None = None
 
         self._attr_unique_id = f"{entry.data['address']}_seat_occupancy"
-        self._attr_name = "人体接近"
-        self._attr_icon = "mdi:motion-sensor"
-        self._attr_is_on = False
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.data["address"])},
-            "name": entry.data.get("name", "AXENT Smart Toilet"),
-            "manufacturer": "AXENT",
-            "model": "Smart Toilet",
-        }
-
-    async def async_added_to_hass(self) -> None:
-        """注册人体接近事件回调。"""
-        self._unregister = self._coordinator.register_occupancy_callback(
-            self._on_occupancy_event
-        )
-
-    async def async_will_remove_from_hass(self) -> None:
-        """取消注册回调。"""
-        if self._unregister is not None:
-            self._unregister()
-            self._unregister = None
-
-    @callback
-    def _on_occupancy_event(self, occupied: bool) -> None:
-        """处理人体接近事件。"""
-        _LOGGER.debug("人体接近状态: %s", "有人" if occupied else "无人")
-        self._attr_is_on = occupied
-        self.async_write_ha_state()
-
-
-class AxentSeatedSensor(BinarySensorEntity):
-    """就座状态传感器（02-0E 帧 byte[20] bit 0）。"""
-
-    _attr_has_entity_name = True
-    _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
-    _attr_translation_key = "seat_seated"
-
-    def __init__(
-        self,
-        coordinator: AxentCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
-        self._coordinator = coordinator
-        self._unregister: Callable[[], None] | None = None
-
-        self._attr_unique_id = f"{entry.data['address']}_seat_seated"
         self._attr_name = "就座状态"
         self._attr_icon = "mdi:seat"
         self._attr_is_on = False
@@ -107,20 +67,26 @@ class AxentSeatedSensor(BinarySensorEntity):
         }
 
     async def async_added_to_hass(self) -> None:
-        """注册就座状态回调。"""
-        self._unregister = self._coordinator.register_seated_callback(
-            self._on_seated_event
+        """注册回调：02-9F 帧 + 02-0E byte[20] 共同驱动。"""
+        self._unsub_occupancy = self._coordinator.register_occupancy_callback(
+            self._on_state_change
+        )
+        self._unsub_seated = self._coordinator.register_seated_callback(
+            self._on_state_change
         )
 
     async def async_will_remove_from_hass(self) -> None:
         """取消注册回调。"""
-        if self._unregister is not None:
-            self._unregister()
-            self._unregister = None
+        if self._unsub_occupancy is not None:
+            self._unsub_occupancy()
+            self._unsub_occupancy = None
+        if self._unsub_seated is not None:
+            self._unsub_seated()
+            self._unsub_seated = None
 
     @callback
-    def _on_seated_event(self, seated: bool) -> None:
-        """处理就座状态变化。"""
+    def _on_state_change(self, seated: bool) -> None:
+        """处理就座状态变化（任一来源触发）。"""
         _LOGGER.debug("就座状态: %s", "已就座" if seated else "已离座")
         self._attr_is_on = seated
         self.async_write_ha_state()
@@ -157,7 +123,6 @@ class AxentConnectivitySensor(BinarySensorEntity):
         self._unregister = self._coordinator.register_connection_callback(
             self._on_connection_change
         )
-        # 同步初始状态
         self._attr_is_on = self._coordinator.is_connected
         self.async_write_ha_state()
 
