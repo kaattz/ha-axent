@@ -19,7 +19,7 @@ def parse_notification(data: bytes | bytearray) -> dict | None:
         return None
 
     # 控制回传帧: 02-0E-30-... (32 bytes)
-    # 包含就座状态、清洗参数、设备状态等
+    # 包含就座状态、清洗参数、设备设置等
     if (
         len(data) == 32
         and data[0] == 0x02
@@ -34,26 +34,55 @@ def parse_notification(data: bytes | bytearray) -> dict | None:
             "seated": seated,
         }
 
-        # 解析清洗参数（byte[3]=0x30, byte[4]=0x00 时为主状态帧）
+        # 主状态帧（byte[3]=0x30, byte[4]=0x00）包含完整设备设置
         if data[3] == 0x30 and data[4] == 0x00:
-            wash_mode = data[10] & 0x03  # 0=无, 1=后洗, 2=妇洗, 3=强力洗
+            # byte[10-13]: 清洗参数
             water_temp = (data[11] >> 4) & 0x0F
             nozzle_pos = data[11] & 0x0F
             water_vol = (data[12] >> 4) & 0x0F
             seat_temp = data[12] & 0x0F
-            wind_temp = (data[13] >> 4) & 0x0F
 
-            result.update({
-                "wash_mode": wash_mode,
-                "water_temp": water_temp,
-                "nozzle_pos": nozzle_pos,
-                "water_vol": water_vol,
-                "seat_temp": seat_temp,
-                "wind_temp": wind_temp,
-            })
+            # byte[14]: 除臭 / 冲水设置
+            deodorize = (data[14] >> 6) == 1
+            flush_setting = (data[14] & 0x03) == 1
+
+            # byte[15]: 节电 / 夜灯
+            eco_raw = (data[15] & 0xF0) >> 4
+            nightlight_raw = (data[15] & 0x0C) >> 2
+            power_save = eco_raw != 0
+            # nightlight: raw 0→smart(2), 1→off(0), 2→on(1)
+            nightlight = 2 if nightlight_raw == 0 else nightlight_raw - 1
+
+            # byte[16]: 感应距离 / 自动翻盖 / 自动关盖
+            sensor_distance = (data[16] & 0xE0) >> 5
+            auto_lid_raw = (data[16] & 0x1C) >> 2
+            # auto_lid: raw 0→off(2), others→raw-1
+            auto_lid = 2 if auto_lid_raw == 0 else auto_lid_raw - 1
+            auto_close = (data[16] & 0x03) == 1
+
+            settings = {
+                "water_temperature": str(water_temp) if water_temp > 0 else "1",
+                "nozzle_position": str(nozzle_pos) if nozzle_pos > 0 else "1",
+                "water_volume": str(water_vol) if water_vol > 0 else "1",
+                "seat_temperature": str(seat_temp) if seat_temp > 0 else "1",
+                "auto_deodorize": deodorize,
+                "flush_on_lid_close": flush_setting,
+                "smart_power_save": power_save,
+                "nightlight_mode": ["off", "on", "smart"][nightlight],
+                "sensor_range": ["far", "medium", "near"][min(sensor_distance, 2)],
+                "auto_lid_mode": ["off", "half_open", "full_open"][min(auto_lid, 2)],
+                "auto_close_lid": auto_close,
+            }
+            result["settings"] = settings
+
             _LOGGER.debug(
-                "主状态帧: 清洗=%d, 水温=%d, 座温=%d",
-                wash_mode, water_temp, seat_temp,
+                "主状态帧: 水温=%s, 座温=%s, 夜灯=%s, 除臭=%s, 感应=%s, 翻盖=%s",
+                settings["water_temperature"],
+                settings["seat_temperature"],
+                settings["nightlight_mode"],
+                settings["auto_deodorize"],
+                settings["sensor_range"],
+                settings["auto_lid_mode"],
             )
 
         return result

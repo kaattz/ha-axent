@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -92,6 +92,8 @@ class AxentSwitch(SwitchEntity, RestoreEntity):
         self._command_on: str = description["command_on"]
         self._command_off: str = description["command_off"]
         self._default_state: bool = description["default"]
+        self._settings_key: str = description["key"]
+        self._unregister_settings: Callable[[], None] | None = None
 
         self._attr_unique_id = f"{entry.data['address']}_{description['key']}"
         self._attr_translation_key = description["key"]
@@ -105,13 +107,34 @@ class AxentSwitch(SwitchEntity, RestoreEntity):
         }
 
     async def async_added_to_hass(self) -> None:
-        """Restore last known state on startup."""
+        """Restore last known state and register settings callback."""
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
         if last_state and last_state.state in ("on", "off"):
             self._attr_is_on = last_state.state == "on"
         else:
             self._attr_is_on = self._default_state
+
+        # 注册设备设置回调
+        self._unregister_settings = self._coordinator.register_settings_callback(
+            self._on_settings_update
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Unregister settings callback."""
+        if self._unregister_settings is not None:
+            self._unregister_settings()
+            self._unregister_settings = None
+
+    @callback
+    def _on_settings_update(self, settings: dict) -> None:
+        """通过 02-0E 回传帧同步设备实际状态。"""
+        if self._settings_key in settings:
+            new_value = bool(settings[self._settings_key])
+            if new_value != self._attr_is_on:
+                _LOGGER.debug("同步 %s: %s → %s", self._settings_key, self._attr_is_on, new_value)
+                self._attr_is_on = new_value
+                self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""

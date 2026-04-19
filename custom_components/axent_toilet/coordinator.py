@@ -179,13 +179,15 @@ class AxentCoordinator:
         self._client: BleakClient | None = None
         self._connect_lock = asyncio.Lock()
         self._reconnect_task: asyncio.Task | None = None
-        self._closing = False  # 标记是否正在关闭（卸载时不重连）
+        self._closing = False
         self._occupancy_callbacks: list[Callable[[bool], None]] = []
         self._seated_callbacks: list[Callable[[bool], None]] = []
         self._connection_callbacks: list[Callable[[bool], None]] = []
+        self._settings_callbacks: list[Callable[[dict], None]] = []
         self._connected = False
         self._occupied: bool | None = None
         self._seated: bool | None = None
+        self._settings: dict | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -232,6 +234,17 @@ class AxentCoordinator:
 
         def unregister() -> None:
             self._connection_callbacks.remove(callback_fn)
+
+        return unregister
+
+    def register_settings_callback(
+        self, callback_fn: Callable[[dict], None]
+    ) -> Callable[[], None]:
+        """注册设备设置回调（02-0E 主状态帧解析），返回取消注册的函数。"""
+        self._settings_callbacks.append(callback_fn)
+
+        def unregister() -> None:
+            self._settings_callbacks.remove(callback_fn)
 
         return unregister
 
@@ -345,17 +358,27 @@ class AxentCoordinator:
                     except Exception:
                         _LOGGER.exception("就座回调执行失败")
 
-        # 02-0E 帧：状态帧中的人体接近（byte[20] bit 0）
+        # 02-0E 帧：就座状态 (byte[20] bit 0)
         if event == "status" and "seated" in parsed:
             occupied = parsed["seated"]
             if occupied != self._occupied:
                 self._occupied = occupied
-                _LOGGER.info("人体接近: %s", "有人" if occupied else "无人")
+                _LOGGER.info("就座状态(0E帧): %s", "有人" if occupied else "无人")
                 for cb in self._occupancy_callbacks:
                     try:
                         cb(occupied)
                     except Exception:
-                        _LOGGER.exception("人体接近回调执行失败")
+                        _LOGGER.exception("就座回调执行失败")
+
+        # 02-0E 主状态帧：设备设置同步
+        if event == "status" and "settings" in parsed:
+            self._settings = parsed["settings"]
+            _LOGGER.info("收到设备设置: %s", self._settings)
+            for cb in self._settings_callbacks:
+                try:
+                    cb(self._settings)
+                except Exception:
+                    _LOGGER.exception("设置同步回调执行失败")
 
     async def async_send_command(self, command: bytes | str) -> None:
         """发送控制命令到马桶。
