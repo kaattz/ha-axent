@@ -97,11 +97,28 @@ custom_components/axent_toilet/
 
 ### 连接管理策略
 
-- **常驻连接**：启动后保持 BLE 连接，持续接收 Notify 状态帧
-- **自动重连**：断线后每 **30 秒** 自动尝试重连
+- **后台连接**：启动时立即返回，BLE 连接与重连全部在后台任务中进行，**不会阻塞 HA 启动**
+- **常驻连接**：连接成功后保持 BLE 连接，持续接收 Notify 状态帧
+- **自动重连**：断线后每 **30 秒** 自动尝试重连，连接任务常驻直到集成卸载
+- **连接超时保护**：单次连接超过 30 秒即放弃并重试，避免底层 BLE 调用挂死导致重连停摆
 - **Notify 订阅**：连接后立即订阅 `FFF1` 特征，实时接收就座状态推送
 
 > **注意**：BLE 常连期间手机 AXENT Remote APP 无法同时连接马桶。
+
+### 启动性能说明
+
+v0.5.6 之前，`_reconnect_loop` 任务使用 `hass.async_create_task` 创建，该任务会被
+`async_block_till_done()` 等待；由于设备离线时重连循环**永不退出**，HA 启动阶段会一直
+等到 300 秒超时，出现以下日志（并导致重启耗时数分钟）：
+
+```
+Setup timed out for bootstrap waiting on {<Task pending name='Task-477'
+  coro=<AxentCoordinator._reconnect_loop() ...>} - moving forward
+Something is blocking Home Assistant from wrapping up the start up phase...
+```
+
+v0.5.6 起改用 `ConfigEntry.async_create_background_task()`：后台任务不会被
+`async_block_till_done()` 等待、不影响启动，并会在集成卸载时自动取消。
 
 ---
 

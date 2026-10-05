@@ -22,15 +22,12 @@ async def async_setup_entry(
     address = entry.data["address"]
     _LOGGER.info("正在设置 AXENT 智能马桶: %s", address)
 
-    coordinator = AxentCoordinator(hass, address)
+    coordinator = AxentCoordinator(hass, entry)
 
-    # 启动常连模式（自动连接 + 断线重连）
-    try:
-        await coordinator.async_start()
-    except Exception:
-        _LOGGER.warning(
-            "初始连接失败，将自动重连: %s", address, exc_info=True
-        )
+    # 启动常连模式（后台自动连接 + 断线重连）。
+    # 这里刻意不 await 连接结果：等待 BLE 连接会阻塞 config entry 的
+    # setup 阶段，进而拖慢甚至超时 Home Assistant 的 bootstrap。
+    await coordinator.async_start()
 
     entry.runtime_data = coordinator
 

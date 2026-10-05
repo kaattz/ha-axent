@@ -451,3 +451,5 @@ PLATFORMS = ["button", "select", "switch", "binary_sensor"]
 
 # --- 连接参数 ---
 RECONNECT_INTERVAL = 30  # 断线重连间隔（秒）
+CONNECT_TIMEOUT = 30  # 单次 BLE 连接超时（秒），避免连接挂死导致重连循环停摆
+CONNECTION_WATCHDOG = 60  # 连接存活复查间隔（秒），防止静默掉线后不再重连

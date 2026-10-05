@@ -1,7 +1,7 @@
 {
   "domain": "axent_toilet",
   "name": "AXENT Smart Toilet",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "config_flow": true,
   "dependencies": ["bluetooth"],
   "bluetooth": [

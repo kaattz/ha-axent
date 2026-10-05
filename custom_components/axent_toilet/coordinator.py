@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 from datetime import datetime
 from typing import Any, Callable
 
@@ -11,11 +12,14 @@ from bleak import BleakClient
 from bleak.exc import BleakError
 
 from homeassistant.components import bluetooth
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 
 from .const import (
     CHAR_NOTIFY_UUID,
     CHAR_WRITE_UUID,
+    CONNECT_TIMEOUT,
+    CONNECTION_WATCHDOG,
     RECONNECT_INTERVAL,
 )
 from .protocol import parse_notification
@@ -172,13 +176,15 @@ class AxentCoordinator:
     def __init__(
         self,
         hass: HomeAssistant,
-        address: str,
+        entry: ConfigEntry,
     ) -> None:
         self.hass = hass
-        self.address = address
+        self.entry = entry
+        self.address: str = entry.data["address"]
         self._client: BleakClient | None = None
         self._connect_lock = asyncio.Lock()
-        self._reconnect_task: asyncio.Task | None = None
+        self._connect_task: asyncio.Task | None = None
+        self._disconnected = asyncio.Event()
         self._closing = False
         self._occupancy_callbacks: list[Callable[[bool], None]] = []
         self._seated_callbacks: list[Callable[[bool], None]] = []
@@ -258,19 +264,69 @@ class AxentCoordinator:
                 _LOGGER.exception("连接状态回调执行失败")
 
     async def async_start(self) -> None:
-        """启动常连模式：建立连接并在断线后自动重连。"""
+        """启动常连模式：后台连接 + 断线自动重连。
+
+        本方法必须立即返回：连接与重连都在后台任务中进行。
+        若在此处 await 连接，Home Assistant 的启动阶段会等待该任务，
+        从而拖长甚至超时 bootstrap（Setup timed out for bootstrap）。
+        """
         self._closing = False
-        await self._try_connect()
+        self._schedule_connect()
 
     async def _try_connect(self) -> None:
-        """尝试连接，失败后调度重连。"""
+        """尝试连接一次，失败后等待下一次重连。"""
         try:
             await self.async_connect()
-        except Exception:
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            # 常连模式下设备离线是常态，warning 保持简洁以免刷屏，
+            # 完整堆栈仅在 debug 级别输出。
             _LOGGER.warning(
-                "初始连接失败，%d 秒后重试", RECONNECT_INTERVAL
+                "连接 AXENT 马桶失败，%d 秒后重试: %s",
+                RECONNECT_INTERVAL,
+                err,
             )
-            self._schedule_reconnect()
+            _LOGGER.debug("连接失败详情", exc_info=True)
+            await asyncio.sleep(RECONNECT_INTERVAL)
+
+    def _schedule_connect(self) -> None:
+        """调度后台连接／重连任务。
+
+        使用 ConfigEntry 的后台任务：它不会阻塞 HA 启动，
+        也不会被 async_block_till_done() 等待，并且会在
+        config entry 卸载时自动取消。切勿改用 hass.async_create_task，
+        那会让 HA 启动一直等到任务结束（本集成因此卡住过 bootstrap）。
+        """
+        if self._connect_task is not None and not self._connect_task.done():
+            return  # 已有连接任务在进行
+        self._connect_task = self.entry.async_create_background_task(
+            self.hass, self._connect_loop(), "axent_toilet_connect"
+        )
+
+    async def _connect_loop(self) -> None:
+        """常连主循环：连接 → 等待断线 → 重连，直到集成被卸载。
+
+        与旧实现不同，这里不会在连接失败时退出：循环本身即重连机制，
+        因此该任务在集成卸载前始终存活。
+        """
+        while not self._closing:
+            await self._try_connect()
+            if not self.is_connected:
+                continue  # 连接失败（已 sleep）或立刻掉线，直接重试
+
+            # 连接成功：阻塞等待断线事件，避免空转占用 CPU。
+            # 先 clear 再检查，保证“clear 与 wait 之间掉线”也能被捕获。
+            self._disconnected.clear()
+            if not self.is_connected:
+                continue
+
+            # 超时仅作看门狗：若链路静默失效而底层未回调，
+            # 超时后回到循环顶部复查 is_connected 并自动重连。
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    self._disconnected.wait(), timeout=CONNECTION_WATCHDOG
+                )
 
     async def async_connect(self) -> None:
         """建立 BLE 连接并订阅 Notify。"""
@@ -282,55 +338,54 @@ class AxentCoordinator:
                 self.hass, self.address, connectable=True
             )
             if ble_device is None:
-                raise BleakError(
-                    f"找不到 BLE 设备: {self.address}"
-                )
+                raise BleakError(f"找不到 BLE 设备: {self.address}")
 
-            self._client = BleakClient(
+            client = BleakClient(
                 ble_device,
                 disconnected_callback=self._on_disconnect,
             )
-            await self._client.connect()
-            _LOGGER.info("已连接到 AXENT 马桶: %s", self.address)
+            # 连接+订阅加超时，避免底层 BLE 调用挂死把重连循环永久卡住
+            try:
+                async with asyncio.timeout(CONNECT_TIMEOUT):
+                    await client.connect()
+                    _LOGGER.info("已连接到 AXENT 马桶: %s", self.address)
 
-            # 订阅 Notify 特征
-            await self._client.start_notify(
-                CHAR_NOTIFY_UUID, self._on_notification
-            )
+                    # 订阅 Notify 特征
+                    await client.start_notify(
+                        CHAR_NOTIFY_UUID, self._on_notification
+                    )
+            except Exception:
+                with suppress(Exception):
+                    await client.disconnect()
+                raise
+
             _LOGGER.info("已订阅 Notify，持续监听状态帧")
+            # 先发布 client 再通知回调，保证回调里读到的是已连接状态
+            self._client = client
             self._notify_connection_state(True)
 
-    @callback
     def _on_disconnect(self, client: BleakClient) -> None:
-        """BLE 断开回调 — 自动重连。"""
+        """BLE 断开回调 — 自动重连。
+
+        bleak 的断开回调可能由其它线程触发（WinRT / BlueZ 后端均如此），
+        因此这里不做任何事件循环操作，统一转回事件循环线程执行，
+        避免跨线程修改 asyncio 对象或写入实体状态。
+        """
+        try:
+            self.hass.loop.call_soon_threadsafe(self._handle_disconnect)
+        except RuntimeError:
+            # 事件循环已关闭（HA 正在退出），无需再重连
+            _LOGGER.debug("事件循环已关闭，忽略断开回调")
+
+    @callback
+    def _handle_disconnect(self) -> None:
+        """在事件循环线程内处理断开：通知实体并唤醒重连循环。"""
         _LOGGER.warning("AXENT 马桶 BLE 连接已断开: %s", self.address)
         self._notify_connection_state(False)
         if not self._closing:
-            self._schedule_reconnect()
-
-    def _schedule_reconnect(self) -> None:
-        """调度自动重连任务。"""
-        if self._reconnect_task is not None and not self._reconnect_task.done():
-            return  # 已有重连任务在进行
-        self._reconnect_task = self.hass.async_create_task(
-            self._reconnect_loop()
-        )
-
-    async def _reconnect_loop(self) -> None:
-        """持续尝试重连直到成功。"""
-        while not self._closing:
-            await asyncio.sleep(RECONNECT_INTERVAL)
-            if self.is_connected or self._closing:
-                return
-            try:
-                _LOGGER.info("尝试重连 AXENT 马桶...")
-                await self.async_connect()
-                _LOGGER.info("重连成功")
-                return
-            except Exception:
-                _LOGGER.debug(
-                    "重连失败，%d 秒后重试", RECONNECT_INTERVAL
-                )
+            # 唤醒常连主循环去重连；任务若已存在则仅为兜底
+            self._disconnected.set()
+            self._schedule_connect()
 
     def _on_notification(
         self, sender: Any, data: bytearray
@@ -389,8 +444,11 @@ class AxentCoordinator:
         """
         if not self.is_connected:
             await self.async_connect()
+            # 手动建立连接后，确保断线仍有后台任务负责重连
+            self._schedule_connect()
 
-        if self._client is None:
+        client = self._client
+        if client is None:
             raise BleakError("BLE 客户端未初始化")
 
         if isinstance(command, str):
@@ -406,7 +464,7 @@ class AxentCoordinator:
             "发送命令: %s → %s", frame.hex("-"), CHAR_WRITE_UUID
         )
         try:
-            await self._client.write_gatt_char(
+            await client.write_gatt_char(
                 CHAR_WRITE_UUID, frame, response=True
             )
             _LOGGER.debug("命令写入成功 (with response)")
@@ -414,7 +472,7 @@ class AxentCoordinator:
             _LOGGER.warning(
                 "write_gatt_char(response=True) 失败: %s，尝试 response=False", err
             )
-            await self._client.write_gatt_char(
+            await client.write_gatt_char(
                 CHAR_WRITE_UUID, frame, response=False
             )
             _LOGGER.debug("命令写入成功 (without response)")
@@ -422,15 +480,13 @@ class AxentCoordinator:
     async def async_disconnect(self) -> None:
         """断开 BLE 连接（仅卸载时调用）。"""
         self._closing = True
-        if self._reconnect_task is not None:
-            self._reconnect_task.cancel()
-            self._reconnect_task = None
-        if self._client is not None and self._client.is_connected:
-            try:
-                await self._client.disconnect()
-            except BleakError:
-                _LOGGER.debug("断开连接时出错（忽略）", exc_info=True)
-            finally:
-                self._client = None
-                self._notify_connection_state(False)
-                _LOGGER.info("已断开 AXENT 马桶连接: %s", self.address)
+        if self._connect_task is not None:
+            self._connect_task.cancel()
+            self._connect_task = None
+        client = self._client
+        self._client = None
+        if client is not None and client.is_connected:
+            with suppress(Exception):
+                await client.disconnect()
+        self._notify_connection_state(False)
+        _LOGGER.info("已断开 AXENT 马桶连接: %s", self.address)
